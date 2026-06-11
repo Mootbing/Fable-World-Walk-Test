@@ -9,6 +9,7 @@ import { BuildingManager } from "./buildingManager";
 import { SimBridge, flattenFootprints, FlatFootprints } from "./sim/simBridge";
 import { BTN } from "./sim/entityLayout";
 import { PlayerAvatar } from "./render/playerAvatar";
+import { VehicleRenderer } from "./render/vehicleRenderer";
 import type { CameraClamp } from "./render/cameraRig";
 import { useHud } from "./store";
 
@@ -18,6 +19,10 @@ export interface MoveInput {
   moving: boolean;
   sprint: boolean;
   jump: boolean;
+  enter: boolean;
+  /** Raw -1..1 axes for vehicles (throttle / steering). */
+  forward: number;
+  strafe: number;
 }
 
 const DIFF_INTERVAL = 0.25;
@@ -52,9 +57,12 @@ export class WorldEngine {
   readonly eventLog: number[] = [];
   /** Visible player body (third person only). */
   readonly avatar = new PlayerAvatar();
+  readonly vehicleRenderer = new VehicleRenderer();
   /** Renderer-reported camera state, for HUD/tests. */
   camMode: "fp" | "tp" = "fp";
   camPos = { x: 0, y: 0, z: 0 };
+  /** Per-frame driving snapshot for the chase cam + HUD. */
+  driveState: { yaw: number; speed: number } | null = null;
 
   private queue: FetchQueue;
   private heights: HeightFieldRegistry;
@@ -82,7 +90,12 @@ export class WorldEngine {
     this.heights = new HeightFieldRegistry(this.anchor);
     this.chunks = new ChunkManager(this.anchor, this.queue, this.heights);
     this.buildings = new BuildingManager(this.anchor, this.queue, this.heights, this.collision);
-    this.group.add(this.chunks.group, this.buildings.group, this.avatar.group);
+    this.group.add(
+      this.chunks.group,
+      this.buildings.group,
+      this.avatar.group,
+      this.vehicleRenderer.group,
+    );
 
     // Every decoded heightfield mirrors into the sim (queued until boot).
     this.heights.onSet = (tx, ty, originX, originZ, size, field) => {
@@ -162,11 +175,24 @@ export class WorldEngine {
     this.elapsed += dt;
 
     if (this.sim) {
-      const buttons = (input.sprint ? BTN.sprint : 0) | (input.jump ? BTN.jump : 0);
-      this.sim.setInput(buttons, input.moving ? input.dirX : 0, input.moving ? input.dirZ : 0);
+      const buttons =
+        (input.sprint ? BTN.sprint : 0) |
+        (input.jump ? BTN.jump : 0) |
+        (input.enter ? BTN.enter : 0);
+      this.sim.setInput(
+        buttons,
+        input.moving ? input.dirX : 0,
+        input.moving ? input.dirZ : 0,
+        input.forward,
+        input.strafe,
+      );
       this.sim.step(dt);
       this.playerCache = this.sim.playerPos();
+      this.driveState = this.sim.driving()
+        ? { yaw: this.sim.drivingYaw(), speed: this.sim.drivingSpeed() }
+        : null;
       this.avatar.update(this.sim.entityView(), this.sim.entityViewU32(), this.elapsed);
+      this.vehicleRenderer.update(this.sim.entityView(), this.sim.entityViewU32());
 
       const events = this.sim.drainEvents();
       if (events.length > 0) {
@@ -209,6 +235,8 @@ export class WorldEngine {
     if (this.hudTimer >= HUD_INTERVAL) {
       this.hudTimer = 0;
       const { lon, lat } = this.anchor.worldToLonLat(this.playerX, this.playerZ);
+      const nearCar =
+        this.sim && !this.driveState ? this.sim.nearestVehicleDist() : -1;
       useHud.setState({
         lat,
         lon,
@@ -217,6 +245,10 @@ export class WorldEngine {
         buildingsNote: this.buildings.failed ? "building data unavailable" : "",
         simTick: this.sim ? this.sim.tick : 0,
         simMs: this.sim ? this.sim.lastStepMs : 0,
+        vehicle: this.driveState
+          ? { speedKmh: Math.abs(this.driveState.speed) * 3.6 }
+          : null,
+        toast: nearCar > 0 && nearCar <= 3 ? "Press E to enter the vehicle" : "",
       });
     }
   }
@@ -249,6 +281,7 @@ export class WorldEngine {
     this.chunks.disposeAll();
     this.buildings.disposeAll();
     this.avatar.dispose();
+    this.vehicleRenderer.dispose();
     this.sim?.dispose();
     this.sim = null;
   }

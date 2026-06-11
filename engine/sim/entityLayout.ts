@@ -35,17 +35,23 @@ export const ENTITY_TYPE = {
 
 export const STATE_FLAG = {
   grounded: 1,
+  inVehicle: 2,
 } as const;
 
 /** Input button bitfield (mirrors sim/src/input.rs). */
 export const BTN = {
   sprint: 1 << 4,
+  /** On foot: jump. Driving: handbrake. */
   jump: 1 << 5,
+  enter: 1 << 6,
 } as const;
 
 /** Sim event types (mirrors sim/src/events.rs). Records are 4 u32 words. */
 export const EVENT = {
   jump: 1,
   land: 2,
+  vehicleEnter: 3,
+  vehicleExit: 4,
+  crash: 5,
 } as const;
 export const EVENT_WORDS = 4;

@@ -29,8 +29,11 @@ export class CameraRig {
   mode: CamMode = "fp";
   yaw = 0;
   pitch = 0;
+  /** Set per frame by the renderer while the player drives. */
+  driving: { yaw: number; speed: number } | null = null;
 
   private boomCur = BOOM;
+  private fovCur = 0;
   private euler = new THREE.Euler(0, 0, 0, "YXZ");
   private dir = new THREE.Vector3();
   private target = new THREE.Vector3();
@@ -73,6 +76,21 @@ export class CameraRig {
     clamp: CameraClamp,
     dt: number,
   ): void {
+    // Speed-driven FOV (drive cam only); eased, applied on real change.
+    const speed = this.driving ? Math.abs(this.driving.speed) : 0;
+    const fovTarget = 75 + 12 * Math.min(1, speed / 38);
+    if (this.fovCur === 0) this.fovCur = fovTarget;
+    this.fovCur += (fovTarget - this.fovCur) * Math.min(1, dt * 3);
+    if (Math.abs(camera.fov - this.fovCur) > 0.05) {
+      camera.fov = this.fovCur;
+      camera.updateProjectionMatrix();
+    }
+
+    if (this.driving) {
+      this.applyDriveCam(camera, px, py, pz, clamp, dt);
+      return;
+    }
+
     if (this.mode === "fp") {
       camera.position.set(px, py, pz);
       this.euler.set(this.pitch, this.yaw, 0);
@@ -122,6 +140,64 @@ export class CameraRig {
       this.target.x - this.dir.x * 2,
       this.target.y - this.dir.y * 2,
       this.target.z - this.dir.z * 2,
+    );
+    this.m.lookAt(camera.position, this.lookAt, this.up);
+    camera.quaternion.setFromRotationMatrix(this.m);
+  }
+
+  /**
+   * Chase cam: behind the vehicle, longer/lower boom that stretches with
+   * speed; camera yaw auto-recenters behind the car while it moves, mouse
+   * can still orbit.
+   */
+  private applyDriveCam(
+    camera: THREE.PerspectiveCamera,
+    px: number,
+    py: number,
+    pz: number,
+    clamp: CameraClamp,
+    dt: number,
+  ): void {
+    const drive = this.driving!;
+    if (Math.abs(drive.speed) > 2.5) {
+      const recenter = 1 - Math.exp(-2.2 * dt);
+      let diff = drive.yaw - this.yaw;
+      diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+      this.yaw += diff * recenter;
+    }
+    const pitch = THREE.MathUtils.clamp(this.pitch, -0.9, 0.5);
+
+    const boomLen = 6.6 + Math.min(3, Math.abs(drive.speed) * 0.055);
+    this.target.set(px, py + 0.8, pz);
+    this.dir.set(
+      Math.sin(this.yaw) * Math.cos(pitch + 0.16),
+      Math.sin(pitch + 0.16),
+      Math.cos(this.yaw) * Math.cos(pitch + 0.16),
+    );
+
+    let boom = clamp.clampBoom(
+      this.target.x,
+      this.target.y,
+      this.target.z,
+      this.dir.x,
+      this.dir.y,
+      this.dir.z,
+      boomLen,
+    );
+    boom = Math.max(1.2, boom);
+    this.boomCur = boom < this.boomCur ? boom : Math.min(boom, this.boomCur + BOOM_OUT_SPEED * dt);
+
+    this.desired.copy(this.target).addScaledVector(this.dir, this.boomCur);
+    const ground = clamp.sampleGround(this.desired.x, this.desired.z);
+    if (ground !== null && this.desired.y < ground + 0.5) {
+      this.desired.y = ground + 0.5;
+    }
+
+    camera.position.copy(this.desired);
+    this.lookAt.set(
+      this.target.x - this.dir.x * 4,
+      this.target.y - this.dir.y * 4 + 0.2,
+      this.target.z - this.dir.z * 4,
     );
     this.m.lookAt(camera.position, this.lookAt, this.up);
     camera.quaternion.setFromRotationMatrix(this.m);

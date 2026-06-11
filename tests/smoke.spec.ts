@@ -91,6 +91,40 @@ test("boots from fixtures, sim ticks, player walks", async ({ page }) => {
     timeout: 3_000,
   });
 
+  // PR6: the starter car — warp beside it, E to enter, drive forward,
+  // E to exit. Drive distance is asserted loosely (time dilation, supra).
+  const cars = (await page.evaluate(() => window.__ww!.query("vehicles"))) as {
+    id: number;
+    x: number;
+    z: number;
+  }[];
+  expect(cars.length).toBeGreaterThanOrEqual(1);
+  await page.evaluate(
+    ([x, z]) => window.__ww!.cmd("warpPlayer", x, z),
+    [cars[0].x - 2.2, cars[0].z] as [number, number],
+  );
+  await page.evaluate(() => window.__ww!.press("KeyE", 120));
+  await page.waitForFunction(() => window.__ww!.query("driving") === true, undefined, {
+    timeout: 3_000,
+  });
+  const carBefore = (await page.evaluate(() => window.__ww!.query("player"))) as {
+    x: number;
+    z: number;
+  };
+  await page.evaluate(() => window.__ww!.press("KeyW", 2000));
+  await page.waitForTimeout(2300);
+  const carAfter = (await page.evaluate(() => window.__ww!.query("player"))) as {
+    x: number;
+    z: number;
+  };
+  const driven = Math.hypot(carAfter.x - carBefore.x, carAfter.z - carBefore.z);
+  expect(driven).toBeGreaterThan(3);
+  await page.screenshot({ path: "test-results/driving.png" });
+  await page.evaluate(() => window.__ww!.press("KeyE", 120));
+  await page.waitForFunction(() => window.__ww!.query("driving") === false, undefined, {
+    timeout: 3_000,
+  });
+
   // PR4: building collision lives in the wasm sim — probing west from the
   // spawn plaza must hit a footprint (Times Square's west blockfront) that
   // pushes the circle out, within 250m.

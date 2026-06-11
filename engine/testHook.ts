@@ -40,6 +40,20 @@ export function installTestHook(engine: WorldEngine): () => void {
           return { ...engine.camPos };
         case "avatarVisible":
           return engine.avatar.visible;
+        case "driving":
+          return engine.sim ? engine.sim.driving() : false;
+        case "vehicles": {
+          if (!engine.sim) return [];
+          const f32 = engine.sim.entityView();
+          const u32 = engine.sim.entityViewU32();
+          const out: { id: number; x: number; z: number }[] = [];
+          for (let base = 0; base < f32.length; base += 16) {
+            if (u32[base + 13] >>> 16 === 2) {
+              out.push({ id: u32[base + 12], x: f32[base], z: f32[base + 2] });
+            }
+          }
+          return out;
+        }
         case "hud":
           return useHud.getState();
         case "render": {
@@ -79,6 +93,11 @@ export function installTestHook(engine: WorldEngine): () => void {
         case "lock":
           useHud.setState({ locked: true });
           return true;
+        case "warpPlayer": {
+          const [x, z] = args as [number, number];
+          engine.sim?.setPlayerPos(x, z);
+          return true;
+        }
         case "unlock":
           useHud.setState({ locked: false });
           return true;

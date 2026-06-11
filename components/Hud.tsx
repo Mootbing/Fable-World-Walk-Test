@@ -13,10 +13,16 @@ export default function Hud() {
   const buildingsNote = useHud((s) => s.buildingsNote);
   const simTick = useHud((s) => s.simTick);
   const simMs = useHud((s) => s.simMs);
+  const vehicle = useHud((s) => s.vehicle);
+  const toast = useHud((s) => s.toast);
 
   return (
     <>
-      {locked && <div className="crosshair" />}
+      {locked && !vehicle && <div className="crosshair" />}
+      {locked && toast && <div className="toast">{toast}</div>}
+      {locked && vehicle && (
+        <div className="speedo">{`${Math.round(vehicle.speedKmh)} km/h`}</div>
+      )}
       <div className="hud-panel">
         {`${lat.toFixed(5)}, ${lon.toFixed(5)}  ·  ${elev.toFixed(1)} m`}
         {`\n${fps} fps  ·  ${chunks} chunks  ·  ${tilesInFlight} tiles loading`}

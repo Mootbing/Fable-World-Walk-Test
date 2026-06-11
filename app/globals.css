@@ -143,3 +143,27 @@ body {
     transform: rotate(360deg);
   }
 }
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 18%;
+  transform: translateX(-50%);
+  padding: 8px 18px;
+  border-radius: 6px;
+  background: rgba(10, 14, 20, 0.72);
+  color: #e8edf4;
+  font: 500 14px/1.4 var(--font-sans, system-ui);
+  letter-spacing: 0.02em;
+  pointer-events: none;
+}
+
+.speedo {
+  position: fixed;
+  right: 28px;
+  bottom: 26px;
+  color: #e8edf4;
+  font: 700 26px/1 var(--font-mono, ui-monospace, monospace);
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
