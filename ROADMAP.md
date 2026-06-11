@@ -41,11 +41,14 @@ Dev server runs on **port 3001** (3000 belongs to another app on this machine).
   via per-frame correction writeback until PR4. *Verified:* 15 Rust tests
   (jump arc apex ≈1 m, cliff detach, determinism), smoke asserts jump+events
   in-browser.
-- [ ] **PR4 `feat: building collision in Rust`** — port spatial hash + circle
-  pushout (incl. rowhouse rescue) to `sim/src/collision.rs`; footprints
-  uploaded per tile; TS `collision.ts` slims to camera-occlusion oracle
-  (keeps heights + gains `segmentHits`). *Accept:* can't walk through any
-  building; Rust test ports the rowhouse case.
+- [x] **PR4 `feat: building collision in Rust`** — spatial hash + circle
+  pushout (incl. rowhouse rescue + courtyard even-odd) ported verbatim to
+  `sim/src/collision.rs`; walk-blocking footprints (minHeight ≤ 2.5) flat-
+  uploaded per z14 tile via BuildingManager hooks (+ pre-init queue); the
+  PR3 setPlayerPos correction writeback removed — one physics world; TS
+  CollisionWorld stays populated as the future camera-occlusion oracle
+  (PR5). *Verified:* 21 Rust tests (rowhouse, courtyard, wall-block), smoke
+  probes a real Times Square wall via `resolve_probe`.
 - [ ] **PR5 `feat: third-person camera + visible player character`** —
   `engine/input.ts` (pointer-lock + InputFrame, replaces drei
   PointerLockControls), `engine/render/cameraRig.ts` (fp/tp-foot modes, V

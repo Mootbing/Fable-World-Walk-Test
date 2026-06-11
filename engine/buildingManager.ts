@@ -34,6 +34,14 @@ interface BuildingTile {
  */
 export class BuildingManager {
   readonly group = new THREE.Group();
+  /**
+   * Sim mirror hooks (wired by the engine): fired when a tile's parsed
+   * footprints go live / are unloaded, so the wasm collision world tracks
+   * the same data the renderer shows.
+   */
+  onTileBuildings: ((tx: number, ty: number, buildings: BuildingFeature[]) => void) | null = null;
+  onTileBuildingsRemoved: ((tx: number, ty: number) => void) | null = null;
+
   private tiles = new Map<string, BuildingTile>();
   private template: string | null = null;
   private templateFailed = false;
@@ -213,6 +221,7 @@ export class BuildingManager {
       }
     }
     this.collision.addTile(key, tile.buildings);
+    this.onTileBuildings?.(tile.tx, tile.ty, tile.buildings);
     tile.layer = null;
     tile.state = "live";
   }
@@ -221,6 +230,7 @@ export class BuildingManager {
     tile.abort.abort();
     this.tiles.delete(key);
     this.collision.removeTile(key);
+    if (tile.state === "live") this.onTileBuildingsRemoved?.(tile.tx, tile.ty);
     for (const g of tile.geometries) g.dispose();
     tile.geometries = [];
     if (tile.mesh) {
