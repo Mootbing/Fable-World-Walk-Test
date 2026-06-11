@@ -57,6 +57,8 @@ pub struct Node {
     key: (i64, i64),
     /// Outgoing edge ids.
     pub out: Vec<u32>,
+    /// Incoming edge ids (approaches — intersection arbitration needs them).
+    pub in_edges: Vec<u32>,
     /// Incident (in+out) live edge count; 0 = removable.
     pub incident: u32,
 }
@@ -181,6 +183,7 @@ impl RoadGraph {
                 self.node_ids.remove(&from.key);
             }
             let to = &mut self.nodes[edge.to as usize];
+            to.in_edges.retain(|e| *e != id);
             to.incident -= 1;
             if to.incident == 0 {
                 self.node_ids.remove(&to.key);
@@ -285,6 +288,7 @@ impl RoadGraph {
             z: p.1,
             key: q,
             out: Vec::new(),
+            in_edges: Vec::new(),
             incident: 0,
         });
         self.node_ids.insert(q, id);
@@ -320,6 +324,7 @@ impl RoadGraph {
         };
         self.nodes[from as usize].out.push(id);
         self.nodes[from as usize].incident += 1;
+        self.nodes[to as usize].in_edges.push(id);
         self.nodes[to as usize].incident += 1;
         id
     }

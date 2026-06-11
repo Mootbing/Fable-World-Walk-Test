@@ -103,10 +103,16 @@ Dev server runs on **port 3001** (3000 belongs to another app on this machine).
   *Verified:* 38 Rust tests (no rear-end over 30 s, brakes for parked
   player car, motion through nodes, despawn), smoke: ≥8 cars on real
   midtown streets, moving, finite, sim 1.5 ms.
-- [ ] **PR10 `feat: intersection arbitration + traffic polish`** — class
-  priority, gap acceptance, all-way tie-break, deadlock timeout→creep,
-  virtual signal phases at major×major nodes, brake lights. *Accept:* busy
-  intersection flows for 5 min, no gridlock; Rust 10k-tick deadlock test.
+- [x] **PR10 `feat: intersection arbitration + traffic polish`** — stop
+  lines as virtual IDM leaders; unsignaled: class priority (minor yields
+  to primary) → arrival order → id tie-break, single crossing-group
+  occupant holds the box; signaled (two major flows crossing): stateless
+  position-hashed phase clock (8 s, survives reloads); deadlock breaker:
+  5 s stopped → creep through at 2.5 m/s; FLAG_BRAKING lane bit (visuals
+  in PR29); RoadGraph nodes gained in-edge indexing. *Verified:* 41 Rust
+  tests — minor brakes 8→2.4 m/s while primary holds speed, signal passes
+  both flows, **10k-tick contention: every car keeps moving**; smoke
+  observes live braking in midtown traffic.
 
 ## Phase 3 — Living city
 
