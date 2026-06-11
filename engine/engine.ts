@@ -68,9 +68,12 @@ export class WorldEngine {
   readonly roadDebug = new RoadDebugOverlay();
   /** Per-tile road polylines (minimap + sim upload share this). */
   readonly roadTiles = new Map<string, RoadTile>();
-  /** Renderer-reported camera state, for HUD/tests. */
+  /** Renderer-reported camera state, for HUD/tests/minimap. */
   camMode: "fp" | "tp" = "fp";
   camPos = { x: 0, y: 0, z: 0 };
+  camYaw = 0;
+  /** Generic minimap blips (mission markers, waypoints — future systems). */
+  readonly blips: { id: string; x: number; z: number; color: string }[] = [];
   /** Per-frame driving snapshot for the chase cam + HUD. */
   driveState: { yaw: number; speed: number } | null = null;
 

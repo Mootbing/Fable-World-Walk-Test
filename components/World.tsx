@@ -8,6 +8,7 @@ import { CONFIG } from "@/engine/config";
 import { InputManager } from "@/engine/input";
 import { CameraRig } from "@/engine/render/cameraRig";
 import { installTestHook } from "@/engine/testHook";
+import { engineRef as globalEngineRef } from "@/engine/engineRef";
 
 function Scene({
   engine,
@@ -53,6 +54,7 @@ function Scene({
     rig.apply(camera, engine.playerX, engine.playerY, engine.playerZ, engine.cameraClamp, dt);
     engine.camMode = rig.mode;
     engine.camPos = { x: camera.position.x, y: camera.position.y, z: camera.position.z };
+    engine.camYaw = rig.yaw;
   });
 
   return <primitive object={engine.group} />;
@@ -69,6 +71,13 @@ export default function World() {
   rigRef.current ??= new CameraRig();
 
   useEffect(() => installTestHook(engine), [engine]);
+
+  useEffect(() => {
+    globalEngineRef.current = engine;
+    return () => {
+      if (globalEngineRef.current === engine) globalEngineRef.current = null;
+    };
+  }, [engine]);
 
   useEffect(() => {
     return () => {
