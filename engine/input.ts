@@ -15,6 +15,8 @@ export interface InputFrame {
   fire: boolean;
   /** RMB aim held. */
   aim: boolean;
+  reload: boolean;
+  switchWeapon: boolean;
   /** Mouse deltas already scaled to radians. */
   yawDelta: number;
   pitchDelta: number;
@@ -121,6 +123,8 @@ export class InputManager {
       horn: locked && !!k.KeyH,
       fire: locked && !!this.mouse[0],
       aim: locked && !!this.mouse[2],
+      reload: locked && !!k.KeyR,
+      switchWeapon: locked && !!k.KeyQ,
       yawDelta: this.yawAcc,
       pitchDelta: this.pitchAcc,
       toggleCamera: this.toggleEdge,

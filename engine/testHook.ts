@@ -42,6 +42,8 @@ export function installTestHook(engine: WorldEngine): () => void {
           return engine.avatar.visible;
         case "driving":
           return engine.sim ? engine.sim.driving() : false;
+        case "weapon":
+          return engine.sim ? engine.sim.weaponState() : null;
         case "stats":
           return engine.sim ? engine.sim.playerStats() : null;
         case "gps":

@@ -21,6 +21,7 @@ export default function Hud() {
   const armor = useHud((s) => s.armor);
   const money = useHud((s) => s.money);
   const dead = useHud((s) => s.dead);
+  const weapon = useHud((s) => s.weapon);
 
   return (
     <>
@@ -33,6 +34,13 @@ export default function Hud() {
       )}
       {locked && <div className="clock">{clock}</div>}
       {locked && <div className="money">{`$${Math.round(money)}`}</div>}
+      {locked && weapon && (
+        <div className="weapon">
+          {weapon.reloading
+            ? `${weapon.name} · reloading…`
+            : `${weapon.name} · ${weapon.clip}/${weapon.reserve}`}
+        </div>
+      )}
       {locked && (
         <div className="vitals">
           <div className="bar health">

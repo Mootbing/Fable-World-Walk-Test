@@ -209,7 +209,7 @@ test("boots from fixtures, sim ticks, player walks", async ({ page }) => {
   // PR11: pedestrians stroll the sidewalks (sim count + still rendering
   // through 4 instanced pools — covered by the constant-mesh assertion).
   await page.waitForFunction(() => (window.__ww!.query("peds") as number) >= 5, undefined, {
-    timeout: 30_000,
+    timeout: 60_000, // late-run time dilation makes sim seconds slow
   });
   await page.screenshot({ path: "test-results/peds.png" });
 
@@ -256,17 +256,21 @@ test("boots from fixtures, sim ticks, player walks", async ({ page }) => {
     window.__ww!.cmd("setWaypoint", 0, -250),
   )) as number;
   expect(routePts).toBeGreaterThan(4);
-  await page.waitForTimeout(300);
-  const magenta = await page.evaluate(() => {
-    const canvas = document.querySelector("canvas.minimap") as HTMLCanvasElement;
-    const data = canvas.getContext("2d")!.getImageData(0, 0, canvas.width, canvas.height).data;
-    let hits = 0;
-    for (let i = 0; i < data.length; i += 4) {
-      if (data[i] > 150 && data[i + 2] > 150 && data[i + 1] < 120) hits++;
-    }
-    return hits;
-  });
-  expect(magenta).toBeGreaterThan(20);
+  // Poll: radar redraws on its own clock, which lags under late-run load.
+  await page.waitForFunction(
+    () => {
+      const canvas = document.querySelector("canvas.minimap") as HTMLCanvasElement | null;
+      if (!canvas) return false;
+      const data = canvas.getContext("2d")!.getImageData(0, 0, canvas.width, canvas.height).data;
+      let hits = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        if (data[i] > 150 && data[i + 2] > 150 && data[i + 1] < 120) hits++;
+      }
+      return hits > 20;
+    },
+    undefined,
+    { timeout: 15_000 },
+  );
   await page.evaluate(() => window.__ww!.press("KeyM", 80));
   await page.waitForFunction(
     () => (window.__ww!.query("hud") as { mapOpen: boolean }).mapOpen === true,
@@ -365,6 +369,38 @@ test("boots from fixtures, sim ticks, player walks", async ({ page }) => {
     () => (window.__ww!.query("stats") as { money: number }).money,
   )) as number;
   expect(moneyAfterMelee).toBeGreaterThan(meleeStart.money);
+
+  // PR18: the pistol — grab the starter iron, aim+fire at a spawned ped,
+  // expect gunshots in the ring and the clip to drain.
+  await page.evaluate(() => window.__ww!.cmd("warpPlayer", -7, 0));
+  await page.waitForFunction(
+    () => (window.__ww!.query("weapon") as { equipped: number } | null)?.equipped === 1,
+    undefined,
+    { timeout: 5_000 },
+  );
+  await page.evaluate(() => window.__ww!.cmd("spawnPed", -7, -6));
+  await page.waitForTimeout(200);
+  for (let shot = 0; shot < 4; shot++) {
+    await page.evaluate(() => {
+      window.dispatchEvent(new MouseEvent("mousedown", { button: 2 }));
+      window.dispatchEvent(new MouseEvent("mousedown", { button: 0 }));
+      // Hold long: late-run headless frame gaps can exceed 500ms, and a
+      // press shorter than one frame is invisible to the input sampler.
+      setTimeout(() => {
+        window.dispatchEvent(new MouseEvent("mouseup", { button: 0 }));
+        window.dispatchEvent(new MouseEvent("mouseup", { button: 2 }));
+      }, 900);
+    });
+    await page.waitForTimeout(1400);
+  }
+  const gunLog = (await page.evaluate(() => window.__ww!.query("eventLog"))) as number[];
+  let gunshots = 0;
+  for (let i = 0; i < gunLog.length; i += 4) if (gunLog[i] === 14) gunshots++;
+  expect(gunshots).toBeGreaterThanOrEqual(2);
+  const weaponAfter = (await page.evaluate(() => window.__ww!.query("weapon"))) as {
+    clip: number;
+  };
+  expect(weaponAfter.clip).toBeLessThan(12);
 
   // World actually meshed: 9 terrain chunks alone are ~295k triangles, and
   // Times Square building tiles add meshes on top.

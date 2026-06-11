@@ -31,6 +31,8 @@ export class CameraRig {
   pitch = 0;
   /** Set per frame by the renderer while the player drives. */
   driving: { yaw: number; speed: number } | null = null;
+  /** RMB aim (on foot): tighter shoulder cam. */
+  aiming = false;
 
   private boomCur = BOOM;
   private fovCur = 0;
@@ -98,7 +100,8 @@ export class CameraRig {
       return;
     }
 
-    // Third person: orbit behind the head with a shoulder offset.
+    // Third person: orbit behind the head with a shoulder offset
+    // (aiming pulls in tight over the shoulder).
     const pitch = THREE.MathUtils.clamp(this.pitch, TP_PITCH_MIN, TP_PITCH_MAX);
     this.target.set(px, py + 0.25, pz);
     this.dir.set(
@@ -112,6 +115,10 @@ export class CameraRig {
     this.target.x += rightX * SHOULDER;
     this.target.z += rightZ * SHOULDER;
 
+    const wantBoom = this.aiming ? 1.9 : BOOM;
+    const shoulder = this.aiming ? 0.62 : SHOULDER;
+    this.target.x += rightX * (shoulder - SHOULDER); // extra shoulder when aiming
+    this.target.z += rightZ * (shoulder - SHOULDER);
     let boom = clamp.clampBoom(
       this.target.x,
       this.target.y,
@@ -119,7 +126,7 @@ export class CameraRig {
       this.dir.x,
       this.dir.y,
       this.dir.z,
-      BOOM,
+      wantBoom,
     );
     boom = Math.max(0.4, boom - 0); // hard floor so we never sit in the head
     // Snap in instantly, relax out smoothly.

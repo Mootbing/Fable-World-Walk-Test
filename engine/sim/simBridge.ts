@@ -210,6 +210,15 @@ export class SimBridge {
     return this.sim.debug_spawn_traffic(x, z, yaw, kind);
   }
 
+  weaponState(): { equipped: number; clip: number; reserve: number; reloading: boolean } {
+    return {
+      equipped: this.sim.weapon_equipped(),
+      clip: this.sim.weapon_clip(),
+      reserve: this.sim.weapon_reserve(),
+      reloading: this.sim.weapon_reloading(),
+    };
+  }
+
   /** Spawn a stationary ped (debug/tests). */
   debugSpawnPed(x: number, z: number): number {
     return this.sim.debug_spawn_ped(x, z);

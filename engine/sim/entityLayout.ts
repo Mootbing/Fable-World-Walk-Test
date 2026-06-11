@@ -53,6 +53,8 @@ export const BTN = {
   horn: 1 << 7,
   fire: 1 << 8,
   aim: 1 << 9,
+  reload: 1 << 10,
+  switchWeapon: 1 << 11,
 } as const;
 
 /** Sim event types (mirrors sim/src/events.rs). Records are 4 u32 words. */
@@ -70,5 +72,8 @@ export const EVENT = {
   pickup: 11,
   punch: 12,
   pedKilled: 13,
+  gunshot: 14,
+  reload: 15,
+  dryfire: 16,
 } as const;
 export const EVENT_WORDS = 4;

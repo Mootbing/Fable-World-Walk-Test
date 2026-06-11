@@ -169,6 +169,49 @@ impl Peds {
         id
     }
 
+    /// Nearest living ped crossed by the 2D ray (ox,oz)+t*(dx,dz), t in
+    /// meters up to max_t. Returns (index, t).
+    pub fn ray_hit(&self, ox: f64, oz: f64, dx: f64, dz: f64, max_t: f64) -> Option<(usize, f64)> {
+        const R: f64 = 0.45;
+        let mut best: Option<(usize, f64)> = None;
+        for (i, p) in self.peds.iter().enumerate() {
+            if p.dead {
+                continue;
+            }
+            // Ray-circle: project center onto ray.
+            let cx = p.x - ox;
+            let cz = p.z - oz;
+            let t = cx * dx + cz * dz;
+            if t < 0.0 || t > max_t {
+                continue;
+            }
+            let lat2 = (cx - dx * t).powi(2) + (cz - dz * t).powi(2);
+            if lat2 > R * R {
+                continue;
+            }
+            if best.is_none_or(|(_, bt)| t < bt) {
+                best = Some((i, t));
+            }
+        }
+        best
+    }
+
+    /// Apply damage to a ped; knockdown on survive, corpse+timer on kill.
+    /// Returns true when this hit killed.
+    pub fn apply_damage(&mut self, i: usize, amount: f64, from: (f64, f64), time: f64) -> bool {
+        let p = &mut self.peds[i];
+        p.hp -= amount;
+        if p.hp <= 0.0 {
+            p.dead = true;
+            p.state = PedState::Down { until: time + 4.0 };
+            true
+        } else {
+            let _ = from;
+            p.state = PedState::Down { until: time + 1.2 };
+            false
+        }
+    }
+
     /// Swing at the nearest ped within reach and a forward arc. Returns
     /// (killed, x, z) on contact.
     pub fn punch(&mut self, px: f64, pz: f64, yaw: f64, time: f64) -> Option<(bool, f64, f64)> {
@@ -194,18 +237,9 @@ impl Peds {
             }
         }
         let (i, _) = best?;
-        let p = &mut self.peds[i];
-        p.hp -= 12.0;
-        if p.hp <= 0.0 {
-            p.dead = true;
-            p.state = PedState::Down { until: time + 4.0 };
-            Some((true, p.x, p.z))
-        } else {
-            // Knockdown stagger — they get up and flee (Down → Fleeing),
-            // and stay punchable on the ground (finishers).
-            p.state = PedState::Down { until: time + 1.2 };
-            Some((false, p.x, p.z))
-        }
+        let (x, z) = (self.peds[i].x, self.peds[i].z);
+        let killed = self.apply_damage(i, 12.0, (px, pz), time);
+        Some((killed, x, z))
     }
 
     /// Knock down peds the vehicle body touches at speed; returns hits as
@@ -544,8 +578,9 @@ impl Peds {
         if total == 0 {
             return;
         }
-        for _ in 0..16 {
-            if self.peds.len() as u32 >= self.target {
+        let mut spawned = 0;
+        for _ in 0..24 {
+            if spawned >= 3 || self.peds.len() as u32 >= self.target {
                 break;
             }
             let id = rng.next_below(total as u32) as usize;
@@ -584,7 +619,7 @@ impl Peds {
                 smooth_ground: None,
             });
             self.next_id += 1;
-            break; // one per attempt window
+            spawned += 1;
         }
     }
 }

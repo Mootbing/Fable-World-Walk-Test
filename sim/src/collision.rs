@@ -153,6 +153,66 @@ impl CollisionWorld {
     }
 }
 
+impl CollisionWorld {
+    /// First wall crossing of the 2D segment (x0,z0)→(x1,z1): returns the
+    /// parameter t in [0,1], or None. 2.5D note: bullets treat footprints
+    /// as full-height walls for now (heights upload lands with PR20+).
+    pub fn raycast(&self, x0: f64, z0: f64, x1: f64, z1: f64) -> Option<f64> {
+        let (cx0, cz0) = Self::cell_of(x0.min(x1), z0.min(z1));
+        let (cx1, cz1) = Self::cell_of(x0.max(x1), z0.max(z1));
+        let mut seen: std::collections::HashSet<u64> = std::collections::HashSet::new();
+        let mut best: Option<f64> = None;
+        for cz in cz0..=cz1 {
+            for cx in cx0..=cx1 {
+                let Some(list) = self.cells.get(&(cx, cz)) else { continue };
+                for id in list {
+                    if !seen.insert(*id) {
+                        continue;
+                    }
+                    let fp = &self.arena[id];
+                    for ring in &fp.rings {
+                        for i in 0..ring.len().saturating_sub(1) {
+                            if let Some(t) =
+                                seg_intersect_t(x0, z0, x1, z1, ring[i], ring[i + 1])
+                            {
+                                if best.is_none_or(|b| t < b) {
+                                    best = Some(t);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        best
+    }
+}
+
+/// Parameter t on a→b where it crosses c→d, or None.
+fn seg_intersect_t(
+    ax: f64,
+    az: f64,
+    bx: f64,
+    bz: f64,
+    c: [f64; 2],
+    d: [f64; 2],
+) -> Option<f64> {
+    let rx = bx - ax;
+    let rz = bz - az;
+    let sx = d[0] - c[0];
+    let sz = d[1] - c[1];
+    let denom = rx * sz - rz * sx;
+    if denom.abs() < 1e-12 {
+        return None;
+    }
+    let t = ((c[0] - ax) * sz - (c[1] - az) * sx) / denom;
+    let u = ((c[0] - ax) * rz - (c[1] - az) * rx) / denom;
+    if !(0.0..=1.0).contains(&t) || !(0.0..=1.0).contains(&u) {
+        return None;
+    }
+    Some(t)
+}
+
 fn closest_on_segment(px: f64, pz: f64, a: [f64; 2], b: [f64; 2]) -> (f64, f64) {
     let abx = b[0] - a[0];
     let abz = b[1] - a[1];

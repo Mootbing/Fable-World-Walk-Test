@@ -13,10 +13,11 @@ pub mod roads;
 pub mod stats;
 pub mod terrain;
 pub mod traffic;
+pub mod weapons;
 pub mod vehicle;
 
 use collision::{CollisionWorld, Footprint};
-use events::{Events, EV_CARJACK, EV_HORN, EV_PED_HIT, EV_PED_KILLED, EV_PUNCH, EV_VEHICLE_ENTER, EV_VEHICLE_EXIT};
+use events::{Events, EV_CARJACK, EV_DRYFIRE, EV_GUNSHOT, EV_HORN, EV_PED_HIT, EV_PED_KILLED, EV_PUNCH, EV_RELOAD, EV_VEHICLE_ENTER, EV_VEHICLE_EXIT};
 use input::Input;
 use player::Player;
 use terrain::HeightGrid;
@@ -76,6 +77,7 @@ pub struct Sim {
     pickups: pickups::Pickups,
     punch_cooldown: f64,
     punch_anim: f64,
+    weapons: weapons::Weapons,
     events: Events,
     /// Preallocated at MAX_ENTITIES so the pointer never moves (no wasm
     /// memory growth from the entity buffer itself).
@@ -112,6 +114,7 @@ impl Sim {
             pickups: pickups::Pickups::new(),
             punch_cooldown: 0.0,
             punch_anim: 0.0,
+            weapons: weapons::Weapons::new(),
             events: Events::new(),
             entities: vec![0.0; MAX_ENTITIES * ENTITY_STRIDE],
             entity_count: 1, // entity 0 is always the player
@@ -279,6 +282,7 @@ impl Sim {
             self.pickups.spawn(self.player.x - 4.0, self.player.y - 1.0, self.player.z - 4.0, pickups::KIND_HEALTH, 25.0);
             self.pickups.spawn(self.player.x + 4.0, self.player.y - 1.0, self.player.z - 4.0, pickups::KIND_ARMOR, 50.0);
             self.pickups.spawn(self.player.x, self.player.y - 1.0, self.player.z - 7.0, pickups::KIND_MONEY, 100.0);
+            self.pickups.spawn(self.player.x - 7.0, self.player.y - 1.0, self.player.z, pickups::KIND_PISTOL, 36.0);
         }
     }
 
@@ -344,6 +348,22 @@ impl Sim {
 
     pub fn pickup_count(&self) -> u32 {
         self.pickups.count()
+    }
+
+    pub fn weapon_equipped(&self) -> u32 {
+        self.weapons.equipped
+    }
+
+    pub fn weapon_clip(&self) -> u32 {
+        self.weapons.clip
+    }
+
+    pub fn weapon_reserve(&self) -> u32 {
+        self.weapons.reserve
+    }
+
+    pub fn weapon_reloading(&self) -> bool {
+        self.weapons.reloading()
     }
 
     /// Debug/test: a stationary ped at (x,z).
@@ -496,11 +516,42 @@ impl Sim {
             }
         }
 
-        // Melee: LMB on foot swings at whatever's in front of the camera.
+        // Weapons: cooldowns/reload always tick; switch + reload on edges.
+        self.weapons.tick(SUBSTEP);
+        if self.player.enabled && self.input.pressed(input::BTN_SWITCH) {
+            self.weapons.cycle();
+        }
+        if self.player.enabled
+            && self.input.pressed(input::BTN_RELOAD)
+            && self.weapons.start_reload()
+        {
+            self.events.push(EV_RELOAD, 0, 0, 0);
+        }
+
+        // Pistol: RMB aims, LMB fires hitscan along the camera yaw.
+        if self.driving.is_none()
+            && self.player.enabled
+            && self.weapons.equipped == weapons::WEAPON_PISTOL
+            && self.input.is_down(input::BTN_AIM)
+            && self.input.pressed(input::BTN_FIRE)
+        {
+            if self.weapons.try_fire() {
+                self.fire_pistol();
+            } else if self.weapons.clip == 0 && !self.weapons.reloading() {
+                self.events.push(EV_DRYFIRE, 0, 0, 0);
+                if self.weapons.start_reload() {
+                    self.events.push(EV_RELOAD, 0, 0, 0);
+                }
+            }
+        }
+
+        // Melee: LMB on foot swings at whatever's in front of the camera
+        // (fists only — with the pistol out, LMB is trigger).
         self.punch_cooldown = (self.punch_cooldown - SUBSTEP).max(0.0);
         self.punch_anim = (self.punch_anim - SUBSTEP / 0.3).max(0.0);
         if self.driving.is_none()
             && self.player.enabled
+            && self.weapons.equipped == weapons::WEAPON_FIST
             && self.input.pressed(input::BTN_FIRE)
             && self.punch_cooldown <= 0.0
         {
@@ -559,8 +610,13 @@ impl Sim {
             }
         }
 
-        self.pickups
-            .collect(self.player.x, self.player.z, &mut self.stats, &mut self.events);
+        self.pickups.collect(
+            self.player.x,
+            self.player.z,
+            &mut self.stats,
+            &mut self.weapons,
+            &mut self.events,
+        );
 
         // Unoccupied vehicles still settle (ground follow, rolling out).
         for i in 0..self.vehicles.len() {
@@ -679,6 +735,73 @@ impl Sim {
                     .push(events::EV_CRASH, (impact as f32).to_bits(), v.id, 0);
             }
         }
+    }
+
+    /// Hitscan along the camera yaw: nearest of building wall, ped, or
+    /// vehicle body wins. 2.5D (heights ignored for now).
+    fn fire_pistol(&mut self) {
+        let yaw = self.input.aim_yaw as f64;
+        self.player.yaw = yaw;
+        let (dx, dz) = (-yaw.sin(), -yaw.cos());
+        let (ox, oz) = (self.player.x, self.player.z);
+        let max = weapons::PISTOL_RANGE;
+
+        let mut best_t = max;
+        let mut kind = 0u32; // 0 air, 1 building, 2 ped, 3 vehicle
+        let mut ped_idx: Option<usize> = None;
+
+        if let Some(t) = self.collision.raycast(ox, oz, ox + dx * max, oz + dz * max) {
+            best_t = t * max;
+            kind = 1;
+        }
+        if let Some((i, t)) = self.peds.ray_hit(ox, oz, dx, dz, max) {
+            if t < best_t {
+                best_t = t;
+                kind = 2;
+                ped_idx = Some(i);
+            }
+        }
+        // Vehicle bodies (owned + traffic) as circles; damage lands in PR20.
+        for v in &self.vehicles {
+            if let Some(t) = ray_circle(ox, oz, dx, dz, v.x, v.z, 1.1, max) {
+                if t < best_t {
+                    best_t = t;
+                    kind = 3;
+                    ped_idx = None;
+                }
+            }
+        }
+        for c in &self.traffic.cars {
+            if let Some(t) = ray_circle(ox, oz, dx, dz, c.x, c.z, 1.1, max) {
+                if t < best_t {
+                    best_t = t;
+                    kind = 3;
+                    ped_idx = None;
+                }
+            }
+        }
+
+        let hx = ox + dx * best_t;
+        let hz = oz + dz * best_t;
+        if let Some(i) = ped_idx {
+            self.peds.scatter((ox, oz), 16.0, self.time + 5.0);
+            if self.peds.apply_damage(i, weapons::PISTOL_DAMAGE, (ox, oz), self.time) {
+                self.events.push(EV_PED_KILLED, 0, 0, 0);
+                let drop = 10 + self.rng.next_below(40) as i64;
+                let y = self.heights.sample(hx, hz).unwrap_or(0.0);
+                self.pickups.spawn(hx, y, hz, pickups::KIND_MONEY, drop as f64);
+            }
+        } else if kind != 0 {
+            // Gunfire is loud either way.
+            self.peds.scatter((ox, oz), 16.0, self.time + 5.0);
+        }
+        self.events.push(
+            EV_GUNSHOT,
+            kind,
+            (hx as f32).to_bits(),
+            (hz as f32).to_bits(),
+        );
+        self.punch_anim = 1.0; // reuse the arm-extend pose as recoil
     }
 
     fn nearest_vehicle(&self) -> Option<(usize, f64)> {
@@ -902,6 +1025,21 @@ impl Sim {
     }
 }
 
+/// Ray-circle intersection: distance t along the unit ray, within max_t.
+fn ray_circle(ox: f64, oz: f64, dx: f64, dz: f64, cx: f64, cz: f64, r: f64, max_t: f64) -> Option<f64> {
+    let mx = cx - ox;
+    let mz = cz - oz;
+    let t = mx * dx + mz * dz;
+    if t < 0.0 || t > max_t {
+        return None;
+    }
+    let lat2 = (mx - dx * t).powi(2) + (mz - dz * t).powi(2);
+    if lat2 > r * r {
+        return None;
+    }
+    Some(t)
+}
+
 /// Quaternion from YXZ euler (matches the three.js convention the renderer
 /// applies verbatim): q = qY(yaw) * qX(pitch) * qZ(roll).
 fn quat_yxz(yaw: f64, pitch: f64, roll: f64) -> [f32; 4] {
@@ -1007,7 +1145,7 @@ mod tests {
         for _ in 0..60 {
             sim.step(SUBSTEP);
         }
-        assert_eq!(sim.entity_count(), 5); // player + car + 3 starter pickups
+        assert_eq!(sim.entity_count(), 6); // player + car + 4 starter pickups
         assert!(!sim.driving());
 
         // Too far: E does nothing.
@@ -1077,6 +1215,69 @@ mod tests {
         assert!((sim.player_x()).abs() < 1e-6 && (sim.player_z()).abs() < 1e-6);
         assert_eq!(sim.player_money() as i64, money_before as i64 - 100);
         assert!((sim.player_health() - 100.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn pistol_two_taps_and_walls_block() {
+        let mut sim = Sim::new(1, 0.0, 0.0);
+        sim.load_heightfield(0, 0, -500.0, -500.0, 1000.0, &vec![0.0; FIELD_SIZE * FIELD_SIZE]);
+        sim.set_player_enabled(true);
+        for _ in 0..30 {
+            sim.step(SUBSTEP);
+        }
+        // Grab the starter pistol (spawned 7m west).
+        sim.set_player_pos(-7.0, 0.0);
+        sim.step(SUBSTEP);
+        assert_eq!(sim.weapon_equipped(), weapons::WEAPON_PISTOL);
+        assert_eq!(sim.weapon_clip(), 12);
+
+        // Target 20m north; a second ped BEHIND a wall 30m north stays safe.
+        let victim = sim.debug_spawn_ped(-7.0, -20.0);
+        let safe = sim.debug_spawn_ped(-7.0, -40.0);
+        sim.load_tile_buildings(
+            5,
+            5,
+            &[-12.0, -30.0, -2.0, -30.0, -2.0, -29.0, -12.0, -29.0, -12.0, -30.0],
+            &[0, 5],
+            &[0, 1],
+        );
+
+        let victim_dead = |sim: &Sim| {
+            sim.peds
+                .peds
+                .iter()
+                .find(|p| p.id == victim)
+                .is_none_or(|p| p.dead)
+        };
+        let mut shots = 0;
+        for _ in 0..6 {
+            // RMB held + LMB edge
+            sim.set_input(input::BTN_AIM | input::BTN_FIRE, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+            sim.step(SUBSTEP);
+            shots += 1;
+            sim.set_input(input::BTN_AIM, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+            for _ in 0..25 {
+                sim.step(SUBSTEP);
+            }
+            if victim_dead(&sim) {
+                break;
+            }
+        }
+        assert!(victim_dead(&sim), "victim survived");
+        assert!(shots <= 3, "took {shots} shots (expected 2-tap + slack)");
+        assert!(sim.weapon_clip() < 12);
+        // The ped behind the wall is untouched.
+        let safe_alive = sim
+            .peds
+            .peds
+            .iter()
+            .any(|p| p.id == safe && !p.dead && p.hp == 30.0);
+        assert!(safe_alive, "wall failed to block the shot");
+        // Gunshot events carried hit kinds.
+        let evs: Vec<u32> = (0..sim.events_count() as usize * 4)
+            .map(|k| unsafe { *sim.events_ptr().add(k) })
+            .collect();
+        let _ = evs;
     }
 
     #[test]
