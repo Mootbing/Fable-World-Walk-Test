@@ -9,7 +9,8 @@ import { BuildingManager } from "./buildingManager";
 import { SimBridge, flattenFootprints, FlatFootprints } from "./sim/simBridge";
 import { BTN } from "./sim/entityLayout";
 import { PlayerAvatar } from "./render/playerAvatar";
-import { VehicleRenderer } from "./render/vehicleRenderer";
+import { VehiclePools } from "./render/vehiclePools";
+import { KITS } from "./render/vehicleKits";
 import type { CameraClamp } from "./render/cameraRig";
 import { useHud } from "./store";
 
@@ -57,7 +58,7 @@ export class WorldEngine {
   readonly eventLog: number[] = [];
   /** Visible player body (third person only). */
   readonly avatar = new PlayerAvatar();
-  readonly vehicleRenderer = new VehicleRenderer();
+  readonly vehiclePools = new VehiclePools();
   /** Renderer-reported camera state, for HUD/tests. */
   camMode: "fp" | "tp" = "fp";
   camPos = { x: 0, y: 0, z: 0 };
@@ -94,7 +95,7 @@ export class WorldEngine {
       this.chunks.group,
       this.buildings.group,
       this.avatar.group,
-      this.vehicleRenderer.group,
+      this.vehiclePools.group,
     );
 
     // Every decoded heightfield mirrors into the sim (queued until boot).
@@ -192,7 +193,7 @@ export class WorldEngine {
         ? { yaw: this.sim.drivingYaw(), speed: this.sim.drivingSpeed() }
         : null;
       this.avatar.update(this.sim.entityView(), this.sim.entityViewU32(), this.elapsed);
-      this.vehicleRenderer.update(this.sim.entityView(), this.sim.entityViewU32());
+      this.vehiclePools.update(this.sim.entityView(), this.sim.entityViewU32());
 
       const events = this.sim.drainEvents();
       if (events.length > 0) {
@@ -245,9 +246,13 @@ export class WorldEngine {
         buildingsNote: this.buildings.failed ? "building data unavailable" : "",
         simTick: this.sim ? this.sim.tick : 0,
         simMs: this.sim ? this.sim.lastStepMs : 0,
-        vehicle: this.driveState
-          ? { speedKmh: Math.abs(this.driveState.speed) * 3.6 }
-          : null,
+        vehicle:
+          this.driveState && this.sim
+            ? {
+                speedKmh: Math.abs(this.driveState.speed) * 3.6,
+                name: KITS[Math.min(this.sim.drivingKind(), KITS.length - 1)].name,
+              }
+            : null,
         toast: nearCar > 0 && nearCar <= 3 ? "Press E to enter the vehicle" : "",
       });
     }
@@ -281,7 +286,7 @@ export class WorldEngine {
     this.chunks.disposeAll();
     this.buildings.disposeAll();
     this.avatar.dispose();
-    this.vehicleRenderer.dispose();
+    this.vehiclePools.dispose();
     this.sim?.dispose();
     this.sim = null;
   }

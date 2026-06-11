@@ -18,7 +18,7 @@ interface HudState {
   simTick: number;
   simMs: number;
   /** Non-null while driving. */
-  vehicle: { speedKmh: number } | null;
+  vehicle: { speedKmh: number; name: string } | null;
   /** Interaction prompt ("Press E…"); empty when none. */
   toast: string;
 }

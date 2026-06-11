@@ -56,6 +56,7 @@ pub struct Sim {
     /// Index into `vehicles` while the player is driving.
     driving: Option<usize>,
     next_vehicle_id: u32,
+    rng: rng::Pcg32,
     events: Events,
     /// Preallocated at MAX_ENTITIES so the pointer never moves (no wasm
     /// memory growth from the entity buffer itself).
@@ -82,6 +83,7 @@ impl Sim {
             vehicles: Vec::new(),
             driving: None,
             next_vehicle_id: 1,
+            rng: rng::Pcg32::new(rng::derive_seed(seed, "world", 0, 0)),
             events: Events::new(),
             entities: vec![0.0; MAX_ENTITIES * ENTITY_STRIDE],
             entity_count: 1, // entity 0 is always the player
@@ -193,8 +195,13 @@ impl Sim {
     pub fn spawn_vehicle(&mut self, x: f64, z: f64, yaw: f64, kind: u32) -> u32 {
         let id = self.next_vehicle_id;
         self.next_vehicle_id += 1;
-        self.vehicles.push(Vehicle::new(id, kind, x, z, yaw));
+        let paint = self.rng.next_below(8);
+        self.vehicles.push(Vehicle::new(id, kind, paint, x, z, yaw));
         id
+    }
+
+    pub fn driving_kind(&self) -> u32 {
+        self.driving.map_or(0, |i| self.vehicles[i].kind)
     }
 
     pub fn driving(&self) -> bool {
@@ -475,7 +482,7 @@ impl Sim {
             e[9] = v.steer as f32;
             e[11] = 1.0;
             e[12] = f32::from_bits(v.id);
-            e[13] = f32::from_bits(TYPE_VEHICLE << 16 | v.kind);
+            e[13] = f32::from_bits(TYPE_VEHICLE << 16 | v.kind << 8 | v.paint);
             e[14] = f32::from_bits(if Some(slot) == driving { FLAG_IN_VEHICLE } else { 0 });
         }
 

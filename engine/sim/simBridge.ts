@@ -136,6 +136,10 @@ export class SimBridge {
     return this.sim.driving_yaw();
   }
 
+  drivingKind(): number {
+    return this.sim.driving_kind();
+  }
+
   nearestVehicleDist(): number {
     return this.sim.nearest_vehicle_dist();
   }

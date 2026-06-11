@@ -8,23 +8,51 @@ use crate::events::{Events, EV_CRASH};
 use crate::terrain::HeightGrid;
 
 pub const KIND_SEDAN: u32 = 0;
+pub const KIND_HATCH: u32 = 1;
+pub const KIND_VAN: u32 = 2;
+pub const KIND_TAXI: u32 = 3;
+pub const KIND_POLICE: u32 = 4;
+pub const KIND_SPORT: u32 = 5;
+pub const KIND_COUNT: u32 = 6;
 
-const WHEELBASE: f64 = 2.7;
-/// Half-extents of the sedan body (for collision sample circles).
-pub const HALF_LENGTH: f64 = 2.2;
+/// Per-class handling envelope. Mirrored (dimensions only) by the
+/// renderer's kit table in engine/render/vehicleKits.ts.
+pub struct VehicleSpec {
+    pub accel: f64,
+    pub brake: f64,
+    pub max_speed: f64,
+    pub max_reverse: f64,
+    pub steer_max: f64,
+    pub grip: f64,
+    pub wheelbase: f64,
+    pub half_length: f64,
+    pub half_width: f64,
+}
+
+pub const SPECS: [VehicleSpec; KIND_COUNT as usize] = [
+    // sedan
+    VehicleSpec { accel: 7.0, brake: 14.0, max_speed: 38.0, max_reverse: 9.0, steer_max: 0.55, grip: 8.0, wheelbase: 2.7, half_length: 2.2, half_width: 0.93 },
+    // hatch — nimble, slower top end
+    VehicleSpec { accel: 7.5, brake: 14.0, max_speed: 33.0, max_reverse: 9.0, steer_max: 0.62, grip: 8.5, wheelbase: 2.45, half_length: 1.95, half_width: 0.88 },
+    // van — sluggish barge
+    VehicleSpec { accel: 4.5, brake: 11.0, max_speed: 28.0, max_reverse: 7.0, steer_max: 0.48, grip: 6.5, wheelbase: 3.2, half_length: 2.6, half_width: 0.98 },
+    // taxi — sedan with a harder life
+    VehicleSpec { accel: 7.2, brake: 14.0, max_speed: 37.0, max_reverse: 9.0, steer_max: 0.55, grip: 8.0, wheelbase: 2.7, half_length: 2.2, half_width: 0.93 },
+    // police — interceptor
+    VehicleSpec { accel: 9.0, brake: 16.0, max_speed: 44.0, max_reverse: 10.0, steer_max: 0.55, grip: 9.0, wheelbase: 2.75, half_length: 2.25, half_width: 0.93 },
+    // sport — fast, planted
+    VehicleSpec { accel: 11.0, brake: 17.0, max_speed: 52.0, max_reverse: 10.0, steer_max: 0.50, grip: 10.0, wheelbase: 2.5, half_length: 2.1, half_width: 0.95 },
+];
+
+pub fn spec(kind: u32) -> &'static VehicleSpec {
+    &SPECS[(kind as usize).min(SPECS.len() - 1)]
+}
+
 const BODY_RADIUS: f64 = 0.95;
-
-const ACCEL: f64 = 7.0;
-const BRAKE: f64 = 14.0;
-const MAX_SPEED: f64 = 38.0;
-const MAX_REVERSE: f64 = 9.0;
 /// Linear drag (1/s) + rolling resistance (m/s^2).
 const DRAG: f64 = 0.06;
 const ROLL_RESIST: f64 = 0.6;
-const STEER_MAX: f64 = 0.55;
 const STEER_RATE: f64 = 3.5;
-/// Lateral grip decay (1/s): high = sticks, low = slides.
-const GRIP: f64 = 8.0;
 const GRIP_HANDBRAKE: f64 = 1.4;
 const HANDBRAKE_DECEL: f64 = 7.0;
 /// Crash event fires above this impact speed (m/s).
@@ -35,6 +63,8 @@ const WHEEL_RADIUS: f64 = 0.33;
 pub struct Vehicle {
     pub id: u32,
     pub kind: u32,
+    /// Paint palette index (renderer-side meaning).
+    pub paint: u32,
     pub x: f64,
     pub y: f64,
     pub z: f64,
@@ -58,10 +88,11 @@ pub struct DriveInput {
 }
 
 impl Vehicle {
-    pub fn new(id: u32, kind: u32, x: f64, z: f64, yaw: f64) -> Self {
+    pub fn new(id: u32, kind: u32, paint: u32, x: f64, z: f64, yaw: f64) -> Self {
         Vehicle {
             id,
             kind,
+            paint,
             x,
             y: 0.0,
             z,
@@ -94,6 +125,7 @@ impl Vehicle {
         events: &mut Events,
         dt: f64,
     ) {
+        let s = spec(self.kind);
         let (throttle, steer_in, handbrake) = match input {
             Some(i) => (i.throttle, i.steer, i.handbrake),
             None => (0.0, 0.0, false),
@@ -102,15 +134,15 @@ impl Vehicle {
         // --- longitudinal ---
         if throttle > 0.0 {
             if self.v_long < 0.0 {
-                self.v_long += BRAKE * throttle * dt; // braking out of reverse
+                self.v_long += s.brake * throttle * dt; // braking out of reverse
             } else {
-                self.v_long += ACCEL * throttle * dt;
+                self.v_long += s.accel * throttle * dt;
             }
         } else if throttle < 0.0 {
             if self.v_long > 0.5 {
-                self.v_long += BRAKE * throttle * dt; // braking
+                self.v_long += s.brake * throttle * dt; // braking
             } else {
-                self.v_long += ACCEL * 0.6 * throttle * dt; // reversing
+                self.v_long += s.accel * 0.6 * throttle * dt; // reversing
             }
         }
         if handbrake {
@@ -122,16 +154,16 @@ impl Vehicle {
         if throttle == 0.0 {
             self.v_long -= self.v_long.signum() * (ROLL_RESIST * dt).min(self.v_long.abs());
         }
-        self.v_long = self.v_long.clamp(-MAX_REVERSE, MAX_SPEED);
+        self.v_long = self.v_long.clamp(-s.max_reverse, s.max_speed);
 
         // --- steering (speed-sensitive, rate-limited) ---
-        let steer_limit = STEER_MAX / (1.0 + self.v_long.abs() / 18.0);
+        let steer_limit = s.steer_max / (1.0 + self.v_long.abs() / 18.0);
         let target = steer_in.clamp(-1.0, 1.0) * steer_limit;
         let d = (target - self.steer).clamp(-STEER_RATE * dt, STEER_RATE * dt);
         self.steer += d;
 
         // --- yaw from bicycle kinematics (+ a drift kick under handbrake) ---
-        let mut yaw_rate = -(self.v_long / WHEELBASE) * self.steer.tan();
+        let mut yaw_rate = -(self.v_long / s.wheelbase) * self.steer.tan();
         if handbrake {
             yaw_rate *= 1.6;
         }
@@ -141,7 +173,7 @@ impl Vehicle {
         // Yawing transfers some longitudinal velocity into the lateral
         // channel (the rear stepping out).
         self.v_lat += yaw_rate * self.v_long * 0.25 * dt;
-        let grip = if handbrake { GRIP_HANDBRAKE } else { GRIP };
+        let grip = if handbrake { GRIP_HANDBRAKE } else { s.grip };
         self.v_lat *= (-grip * dt).exp();
 
         // --- integrate ---
@@ -155,9 +187,9 @@ impl Vehicle {
         // --- collision: three sample circles along the body axis ---
         let speed_before = self.speed();
         let mut hit = false;
-        for s in [-HALF_LENGTH + BODY_RADIUS, 0.0, HALF_LENGTH - BODY_RADIUS] {
-            let cx = self.x + fx * s;
-            let cz = self.z + fz * s;
+        for off in [-s.half_length + BODY_RADIUS, 0.0, s.half_length - BODY_RADIUS] {
+            let cx = self.x + fx * off;
+            let cz = self.z + fz * off;
             let (px, pz) = collision.resolve(cx, cz, BODY_RADIUS);
             if px != cx || pz != cz {
                 self.x += px - cx;
@@ -197,16 +229,18 @@ impl Vehicle {
             self.smooth_ground = Some(smooth);
             self.y = smooth;
 
-            let ahead = heights.sample(self.x + fx * HALF_LENGTH, self.z + fz * HALF_LENGTH);
-            let behind = heights.sample(self.x - fx * HALF_LENGTH, self.z - fz * HALF_LENGTH);
-            let right_h = heights.sample(self.x + rx * 0.9, self.z + rz * 0.9);
-            let left_h = heights.sample(self.x - rx * 0.9, self.z - rz * 0.9);
+            let hl = s.half_length;
+            let hw = s.half_width;
+            let ahead = heights.sample(self.x + fx * hl, self.z + fz * hl);
+            let behind = heights.sample(self.x - fx * hl, self.z - fz * hl);
+            let right_h = heights.sample(self.x + rx * hw, self.z + rz * hw);
+            let left_h = heights.sample(self.x - rx * hw, self.z - rz * hw);
             let target_pitch = match (ahead, behind) {
-                (Some(a), Some(b)) => ((a - b) / (2.0 * HALF_LENGTH)).atan(),
+                (Some(a), Some(b)) => ((a - b) / (2.0 * hl)).atan(),
                 _ => 0.0,
             };
             let target_roll = match (right_h, left_h) {
-                (Some(r), Some(l)) => ((r - l) / 1.8).atan(),
+                (Some(r), Some(l)) => ((r - l) / (2.0 * hw)).atan(),
                 _ => 0.0,
             };
             let k = (dt * 6.0).min(1.0);
@@ -242,7 +276,7 @@ mod tests {
     fn accelerates_brakes_and_reverses() {
         let hg = flat();
         let cw = CollisionWorld::new();
-        let mut v = Vehicle::new(1, KIND_SEDAN, 0.0, 0.0, 0.0);
+        let mut v = Vehicle::new(1, KIND_SEDAN, 0, 0.0, 0.0, 0.0);
 
         drive(&mut v, &hg, &cw, DriveInput { throttle: 1.0, steer: 0.0, handbrake: false }, 4.0);
         assert!(v.v_long > 18.0, "after 4s throttle: {}", v.v_long);
@@ -253,14 +287,14 @@ mod tests {
 
         drive(&mut v, &hg, &cw, DriveInput { throttle: -1.0, steer: 0.0, handbrake: false }, 2.0);
         assert!(v.v_long < -2.0, "reversing: {}", v.v_long);
-        assert!(v.v_long >= -MAX_REVERSE - 0.01);
+        assert!(v.v_long >= -spec(KIND_SEDAN).max_reverse - 0.01);
     }
 
     #[test]
     fn steering_curves_the_path() {
         let hg = flat();
         let cw = CollisionWorld::new();
-        let mut v = Vehicle::new(1, KIND_SEDAN, 0.0, 0.0, 0.0);
+        let mut v = Vehicle::new(1, KIND_SEDAN, 0, 0.0, 0.0, 0.0);
         // Build speed straight, then a short right turn (a long full-lock
         // pull at speed completes whole circles and the end position is
         // phase-dependent — assert on the partial arc instead).
@@ -276,14 +310,14 @@ mod tests {
     fn handbrake_slides_and_sheds_speed() {
         let hg = flat();
         let cw = CollisionWorld::new();
-        let mut a = Vehicle::new(1, KIND_SEDAN, 0.0, 0.0, 0.0);
+        let mut a = Vehicle::new(1, KIND_SEDAN, 0, 0.0, 0.0, 0.0);
         drive(&mut a, &hg, &cw, DriveInput { throttle: 1.0, steer: 0.0, handbrake: false }, 4.0);
         let entry = a.v_long;
 
-        let mut b = Vehicle::new(2, KIND_SEDAN, a.x, a.z, a.yaw);
+        let mut b = Vehicle::new(2, KIND_SEDAN, 0, a.x, a.z, a.yaw);
         b.v_long = a.v_long;
         // Same entry state: one keeps steering, one adds handbrake.
-        let mut plain = Vehicle::new(3, KIND_SEDAN, a.x, a.z, a.yaw);
+        let mut plain = Vehicle::new(3, KIND_SEDAN, 0, a.x, a.z, a.yaw);
         plain.v_long = a.v_long;
         drive(&mut b, &hg, &cw, DriveInput { throttle: 0.0, steer: 1.0, handbrake: true }, 1.0);
         drive(&mut plain, &hg, &cw, DriveInput { throttle: 0.0, steer: 1.0, handbrake: false }, 1.0);
@@ -294,6 +328,25 @@ mod tests {
             "slides more: hb {} vs plain {}",
             b.v_lat,
             plain.v_lat
+        );
+    }
+
+    #[test]
+    fn classes_have_distinct_envelopes() {
+        let hg = flat();
+        let cw = CollisionWorld::new();
+        let mut speeds = Vec::new();
+        for kind in [KIND_VAN, KIND_SEDAN, KIND_SPORT] {
+            let mut v = Vehicle::new(1, kind, 0, 0.0, 0.0, 0.0);
+            drive(&mut v, &hg, &cw, DriveInput { throttle: 1.0, steer: 0.0, handbrake: false }, 3.0);
+            speeds.push(v.v_long);
+        }
+        assert!(
+            speeds[0] < speeds[1] && speeds[1] < speeds[2],
+            "van {} < sedan {} < sport {}",
+            speeds[0],
+            speeds[1],
+            speeds[2]
         );
     }
 
@@ -314,7 +367,7 @@ mod tests {
                 ]],
             }],
         );
-        let mut v = Vehicle::new(1, KIND_SEDAN, 0.0, 0.0, 0.0);
+        let mut v = Vehicle::new(1, KIND_SEDAN, 0, 0.0, 0.0, 0.0);
         let mut ev = Events::new();
         let input = DriveInput { throttle: 1.0, steer: 0.0, handbrake: false };
         let mut crashed = false;
@@ -328,7 +381,7 @@ mod tests {
         }
         assert!(crashed, "no crash event");
         // Front of car never penetrates the wall plane.
-        assert!(v.z > -40.0 + HALF_LENGTH - BODY_RADIUS - 0.1, "z {}", v.z);
+        assert!(v.z > -40.0 + spec(KIND_SEDAN).half_length - BODY_RADIUS - 0.1, "z {}", v.z);
         assert!(v.v_long.abs() < 1.0, "stopped: {}", v.v_long);
     }
 }

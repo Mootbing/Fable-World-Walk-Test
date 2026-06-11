@@ -137,6 +137,21 @@ test("boots from fixtures, sim ticks, player walks", async ({ page }) => {
   });
   expect(hitWall).toBeGreaterThan(0);
 
+  // PR7: instanced vehicle pools — spawning a fleet must NOT add scene
+  // meshes (constant draw calls), only instances.
+  const meshesBefore = ((await page.evaluate(() => window.__ww!.query("render"))) as {
+    meshes: number;
+  }).meshes;
+  await page.evaluate(() => window.__ww!.cmd("spawnRow", 24));
+  await page.waitForTimeout(400);
+  const fleet = (await page.evaluate(() => ({
+    vehicles: (window.__ww!.query("vehicles") as unknown[]).length,
+    meshes: (window.__ww!.query("render") as { meshes: number }).meshes,
+  }))) as { vehicles: number; meshes: number };
+  expect(fleet.vehicles).toBeGreaterThanOrEqual(25); // starter car + 24
+  expect(fleet.meshes - meshesBefore).toBeLessThanOrEqual(2);
+  await page.screenshot({ path: "test-results/fleet.png" });
+
   // World actually meshed: 9 terrain chunks alone are ~295k triangles, and
   // Times Square building tiles add meshes on top.
   const render = (await page.evaluate(() => window.__ww!.query("render"))) as {

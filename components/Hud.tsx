@@ -21,7 +21,10 @@ export default function Hud() {
       {locked && !vehicle && <div className="crosshair" />}
       {locked && toast && <div className="toast">{toast}</div>}
       {locked && vehicle && (
-        <div className="speedo">{`${Math.round(vehicle.speedKmh)} km/h`}</div>
+        <div className="speedo">
+          <span className="speedo-name">{vehicle.name}</span>
+          {`${Math.round(vehicle.speedKmh)} km/h`}
+        </div>
       )}
       <div className="hud-panel">
         {`${lat.toFixed(5)}, ${lon.toFixed(5)}  ·  ${elev.toFixed(1)} m`}

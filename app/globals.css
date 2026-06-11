@@ -167,3 +167,12 @@ body {
   text-shadow: 0 1px 6px rgba(0, 0, 0, 0.6);
   pointer-events: none;
 }
+
+.speedo-name {
+  display: block;
+  font: 500 12px/1.6 var(--font-sans, system-ui);
+  color: #b9c2cd;
+  text-align: right;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
