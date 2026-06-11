@@ -173,6 +173,33 @@ test("boots from fixtures, sim ticks, player walks", async ({ page }) => {
   await page.screenshot({ path: "test-results/road-graph.png" });
   await page.evaluate(() => window.__ww!.cmd("roadDebug"));
 
+  // PR9: ambient traffic — AI cars spawn on the real road graph, drive,
+  // and never go non-finite. (Counted from the sim; rendered by the same
+  // instanced pools the PR7 assertion already covered.)
+  await page.waitForFunction(() => (window.__ww!.query("traffic") as number) >= 8, undefined, {
+    timeout: 30_000,
+  });
+  const snap1 = (await page.evaluate(() => window.__ww!.query("vehicles"))) as {
+    id: number;
+    x: number;
+    z: number;
+  }[];
+  await page.waitForTimeout(3_000);
+  const snap2 = (await page.evaluate(() => window.__ww!.query("vehicles"))) as {
+    id: number;
+    x: number;
+    z: number;
+  }[];
+  const pos1 = new Map(snap1.map((v) => [v.id, v]));
+  let moved = 0;
+  for (const v of snap2) {
+    expect(Number.isFinite(v.x) && Number.isFinite(v.z)).toBe(true);
+    const before = pos1.get(v.id);
+    if (before && Math.hypot(v.x - before.x, v.z - before.z) > 2) moved++;
+  }
+  expect(moved).toBeGreaterThan(3);
+  await page.screenshot({ path: "test-results/traffic.png" });
+
   // World actually meshed: 9 terrain chunks alone are ~295k triangles, and
   // Times Square building tiles add meshes on top.
   const render = (await page.evaluate(() => window.__ww!.query("render"))) as {

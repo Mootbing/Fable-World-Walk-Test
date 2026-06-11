@@ -9,6 +9,7 @@ pub mod player;
 pub mod rng;
 pub mod roads;
 pub mod terrain;
+pub mod traffic;
 pub mod vehicle;
 
 use collision::{CollisionWorld, Footprint};
@@ -59,6 +60,7 @@ pub struct Sim {
     next_vehicle_id: u32,
     rng: rng::Pcg32,
     roads: roads::RoadGraph,
+    traffic: traffic::Traffic,
     events: Events,
     /// Preallocated at MAX_ENTITIES so the pointer never moves (no wasm
     /// memory growth from the entity buffer itself).
@@ -87,6 +89,7 @@ impl Sim {
             next_vehicle_id: 1,
             rng: rng::Pcg32::new(rng::derive_seed(seed, "world", 0, 0)),
             roads: roads::RoadGraph::new(),
+            traffic: traffic::Traffic::new(),
             events: Events::new(),
             entities: vec![0.0; MAX_ENTITIES * ENTITY_STRIDE],
             entity_count: 1, // entity 0 is always the player
@@ -177,7 +180,16 @@ impl Sim {
     }
 
     pub fn unload_tile_roads(&mut self, tx: i32, ty: i32) {
-        self.roads.unload_tile((tx, ty));
+        let removed = self.roads.unload_tile((tx, ty));
+        self.traffic.despawn_edges(&removed);
+    }
+
+    pub fn traffic_count(&self) -> u32 {
+        self.traffic.count()
+    }
+
+    pub fn set_traffic_target(&mut self, n: u32) {
+        self.traffic.target = n;
     }
 
     pub fn road_edge_count(&self) -> u32 {
@@ -348,9 +360,10 @@ impl Sim {
     /// Spawn n synthetic entities (slotted after the player and vehicles)
     /// that move every substep, for measuring JS readback cost at scale.
     pub fn bench_spawn(&mut self, n: u32) {
-        let n = (n as usize).min(MAX_ENTITIES - 1 - self.vehicles.len());
+        let used = 1 + self.vehicles.len() + self.traffic.cars.len();
+        let n = (n as usize).min(MAX_ENTITIES.saturating_sub(used));
         self.bench_count = n as u32;
-        self.entity_count = (1 + self.vehicles.len() + n) as u32;
+        self.entity_count = (used + n) as u32;
     }
 }
 
@@ -410,10 +423,22 @@ impl Sim {
             );
         }
 
+        // Ambient traffic on the road graph.
+        let player_vehicle = self.driving.map(|i| &self.vehicles[i]);
+        self.traffic.substep(
+            &self.roads,
+            &self.heights,
+            (self.player.x, self.player.z),
+            player_vehicle,
+            &mut self.rng,
+            SUBSTEP,
+        );
+        self.resolve_player_vs_traffic();
+
         self.input.tick();
 
         let t = self.time as f32;
-        let bench_base = 1 + self.vehicles.len();
+        let bench_base = 1 + self.vehicles.len() + self.traffic.cars.len();
         for i in 0..self.bench_count as usize {
             let base = (bench_base + i) * ENTITY_STRIDE;
             let angle = t * 0.5 + i as f32 * 0.618;
@@ -426,6 +451,45 @@ impl Sim {
             self.entities[base + 11] = 1.0;
             self.entities[base + 12] = f32::from_bits(i as u32 + 1);
             self.entities[base + 13] = f32::from_bits(1 << 16);
+        }
+    }
+
+    /// The player's car can't drive through traffic: circle pushout with
+    /// velocity scaling (traffic itself brakes via IDM and stays put).
+    fn resolve_player_vs_traffic(&mut self) {
+        let Some(vi) = self.driving else {
+            return;
+        };
+        const CONTACT: f64 = 2.4;
+        let mut push = (0.0f64, 0.0f64);
+        let mut hit = false;
+        {
+            let v = &self.vehicles[vi];
+            for car in &self.traffic.cars {
+                let dx = v.x - car.x;
+                let dz = v.z - car.z;
+                let d2 = dx * dx + dz * dz;
+                if d2 < CONTACT * CONTACT && d2 > 1e-9 {
+                    let d = d2.sqrt();
+                    let overlap = CONTACT - d;
+                    push.0 += (dx / d) * overlap;
+                    push.1 += (dz / d) * overlap;
+                    hit = true;
+                }
+            }
+        }
+        if hit {
+            let v = &mut self.vehicles[vi];
+            let speed_before = v.speed();
+            v.x += push.0;
+            v.z += push.1;
+            v.v_long *= 0.45;
+            v.v_lat *= 0.45;
+            let impact = speed_before - v.speed();
+            if impact > 3.0 {
+                self.events
+                    .push(events::EV_CRASH, (impact as f32).to_bits(), v.id, 0);
+            }
         }
     }
 
@@ -537,7 +601,34 @@ impl Sim {
             e[14] = f32::from_bits(if Some(slot) == driving { FLAG_IN_VEHICLE } else { 0 });
         }
 
-        self.entity_count = (1 + self.vehicles.len() + self.bench_count as usize) as u32;
+        // then ambient traffic (same record shape; pools render them all)
+        let traffic_base = 1 + self.vehicles.len();
+        for (slot, c) in self.traffic.cars.iter().enumerate() {
+            let base = (traffic_base + slot) * ENTITY_STRIDE;
+            if base + ENTITY_STRIDE > self.entities.len() {
+                break;
+            }
+            let q = quat_yxz(c.yaw, 0.0, 0.0);
+            let e = &mut self.entities[base..base + ENTITY_STRIDE];
+            e[0] = c.x as f32;
+            e[1] = c.y as f32;
+            e[2] = c.z as f32;
+            e[3] = q[0];
+            e[4] = q[1];
+            e[5] = q[2];
+            e[6] = q[3];
+            e[7] = c.speed as f32;
+            e[8] = c.wheel_spin as f32;
+            e[9] = c.steer as f32;
+            e[11] = 1.0;
+            e[12] = f32::from_bits(c.id);
+            e[13] = f32::from_bits(TYPE_VEHICLE << 16 | c.kind << 8 | c.paint);
+            e[14] = f32::from_bits(0);
+        }
+
+        self.entity_count = (1 + self.vehicles.len() + self.traffic.cars.len()
+            + self.bench_count as usize)
+            .min(MAX_ENTITIES) as u32;
     }
 }
 

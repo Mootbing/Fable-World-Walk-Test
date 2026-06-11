@@ -92,10 +92,17 @@ Dev server runs on **port 3001** (3000 belongs to another app on this machine).
   isolation, bridge continuity, T-junction order-independence, stitch,
   unload/reload, oneway); smoke on real midtown: 1126 edges, 0.895
   connectivity, overlay 3542 verts.
-- [ ] **PR9 `feat: ambient traffic v1`** — spawn annulus 150–400 m (seeded
-  per tile), lane following, IDM car-following, despawn rules incl. tile
-  unload (player vehicle pinned). *Accept:* 20–40 cars driving on the right,
-  queuing cleanly; 5-min soak no NaN/teleport.
+- [x] **PR9 `feat: ambient traffic v1`** — `sim/src/traffic.rs`: kinematic
+  path-followers on the directed graph (same entity records → instanced
+  pools render them for free): spawn annulus 120–350 m with class-weighted
+  edge selection + kind mix (taxis!), RHT lane offset 1.7 m, IDM
+  car-following (same edge chain + the player's car as a corridor leader),
+  seeded straight-preferring turns (no U-turns unless dead end), despawn
+  on distance/edge-unload (graph unload returns removed edge ids), player
+  car can't drive through traffic (circle pushout + crash events).
+  *Verified:* 38 Rust tests (no rear-end over 30 s, brakes for parked
+  player car, motion through nodes, despawn), smoke: ≥8 cars on real
+  midtown streets, moving, finite, sim 1.5 ms.
 - [ ] **PR10 `feat: intersection arbitration + traffic polish`** — class
   priority, gap acceptance, all-way tie-break, deadlock timeout→creep,
   virtual signal phases at major×major nodes, brake lights. *Accept:* busy
