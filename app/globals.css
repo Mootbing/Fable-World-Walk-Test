@@ -1,0 +1,145 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  background: #0c1118;
+  color: #e8edf2;
+  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+}
+
+.world-root {
+  position: fixed;
+  inset: 0;
+}
+
+.world-root canvas {
+  display: block;
+}
+
+.boot {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #93a4b8;
+  font-size: 14px;
+  letter-spacing: 0.06em;
+}
+
+/* ---- HUD ---- */
+
+.crosshair {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  width: 4px;
+  height: 4px;
+  margin: -2px 0 0 -2px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 0 3px rgba(0, 0, 0, 0.9);
+  pointer-events: none;
+}
+
+.hud-panel {
+  position: fixed;
+  left: 12px;
+  bottom: 12px;
+  padding: 8px 10px;
+  background: rgba(10, 14, 20, 0.55);
+  border-radius: 6px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  pointer-events: none;
+  white-space: pre;
+}
+
+.hud-warn {
+  color: #f0b25e;
+}
+
+.attribution {
+  position: fixed;
+  right: 8px;
+  bottom: 8px;
+  max-width: 60vw;
+  text-align: right;
+  font-size: 10px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.78);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+  pointer-events: none;
+}
+
+/* ---- Start / pause overlay ---- */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  background: rgba(8, 11, 16, 0.72);
+  backdrop-filter: blur(3px);
+  text-align: center;
+}
+
+.overlay h1 {
+  font-size: 28px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+.overlay p {
+  color: #aebccb;
+  font-size: 14px;
+  max-width: 46ch;
+  line-height: 1.6;
+}
+
+.overlay .keys {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 13px;
+  color: #cdd9e5;
+}
+
+.overlay button {
+  padding: 12px 28px;
+  font-size: 15px;
+  font-weight: 600;
+  color: #0c1118;
+  background: #e8edf2;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.overlay button:hover {
+  background: #ffffff;
+}
+
+.overlay .spinner {
+  width: 22px;
+  height: 22px;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  border-top-color: #e8edf2;
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
