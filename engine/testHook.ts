@@ -44,6 +44,8 @@ export function installTestHook(engine: WorldEngine): () => void {
           return engine.sim ? engine.sim.driving() : false;
         case "roads":
           return engine.sim ? engine.sim.roadStats() : null;
+        case "traffic":
+          return engine.sim ? engine.sim.trafficCount() : 0;
         case "roadDebugInfo":
           return { visible: engine.roadDebug.visible, vertices: engine.roadDebug.vertexCount };
         case "vehicles": {

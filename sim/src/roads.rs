@@ -163,11 +163,14 @@ impl RoadGraph {
         self.tile_edges.insert(tile, new_edges);
     }
 
-    pub fn unload_tile(&mut self, tile: (i32, i32)) {
+    /// Removes the tile's edges; returns their ids so dependents (traffic)
+    /// can drop references.
+    pub fn unload_tile(&mut self, tile: (i32, i32)) -> Vec<u32> {
         let Some(ids) = self.tile_edges.remove(&tile) else {
-            return;
+            return Vec::new();
         };
-        for id in ids {
+        for id in &ids {
+            let id = *id;
             let Some(edge) = self.edges[id as usize].take() else {
                 continue;
             };
@@ -184,6 +187,7 @@ impl RoadGraph {
             }
             self.free_edges.push(id);
         }
+        ids
     }
 
     fn union_find(&self) -> Vec<u32> {
