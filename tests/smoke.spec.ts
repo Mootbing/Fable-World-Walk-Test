@@ -234,6 +234,22 @@ test("boots from fixtures, sim ticks, player walks", async ({ page }) => {
     timeout: 3_000,
   });
 
+  // PR13: the radar — canvas present and painted with real streets (count
+  // road-colored pixels well above the rim/chevron baseline).
+  const radarPixels = await page.evaluate(() => {
+    const canvas = document.querySelector("canvas.minimap") as HTMLCanvasElement | null;
+    if (!canvas) return -1;
+    const ctx = canvas.getContext("2d")!;
+    const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+    let lit = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      // Light street strokes on the dark disc.
+      if (data[i] > 150 && data[i + 1] > 150 && data[i + 2] > 150 && data[i + 3] > 100) lit++;
+    }
+    return lit;
+  });
+  expect(radarPixels).toBeGreaterThan(800);
+
   // World actually meshed: 9 terrain chunks alone are ~295k triangles, and
   // Times Square building tiles add meshes on top.
   const render = (await page.evaluate(() => window.__ww!.query("render"))) as {

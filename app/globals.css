@@ -52,7 +52,7 @@ body {
 .hud-panel {
   position: fixed;
   left: 12px;
-  bottom: 12px;
+  top: 12px;
   padding: 8px 10px;
   background: rgba(10, 14, 20, 0.55);
   border-radius: 6px;
@@ -175,4 +175,14 @@ body {
   text-align: right;
   letter-spacing: 0.06em;
   text-transform: uppercase;
+}
+
+.minimap {
+  position: fixed;
+  left: 22px;
+  bottom: 22px;
+  width: 220px;
+  height: 220px;
+  pointer-events: none;
+  z-index: 5;
 }

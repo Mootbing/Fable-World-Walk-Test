@@ -134,8 +134,14 @@ Dev server runs on **port 3001** (3000 belongs to another app on this machine).
   setups/tests; "Press E" toast now includes traffic cars. *Verified:*
   47 Rust tests (carjack consumes traffic + spawns fleeing driver,
   knockdown), smoke carjacks a spawned taxi + honks in-browser.
-- [ ] **PR13 `feat: radar minimap`** — canvas radar from road polylines,
-  rotates with heading, blip API, cached per-tile backdrops.
+- [x] **PR13 `feat: radar minimap`** — `components/Minimap.tsx`: 2D canvas
+  radar outside the R3F tree on its own 15 Hz clock; real streets stroked
+  from `engine.roadTiles` (class-based widths), rotate-with-heading
+  (`engine.camYaw`), circular clip, speed-based zoom, player chevron,
+  vehicle/police blips from the entity buffer, generic `engine.blips` API
+  for future systems, N rim marker; `engineRef` module handle for
+  DOM-side components; HUD stats moved top-left. *Verified:* smoke counts
+  >800 street-stroke pixels on the painted radar.
 - [ ] **PR14 `feat: full map + waypoint + GPS routing`** — M pannable map,
   click waypoint, A* in Rust over road graph, magenta GPS polyline, reroute.
 - [ ] **PR15 `feat: area-name toasts + clock HUD`** — `place` layer →
