@@ -38,6 +38,26 @@ test("boots from fixtures, sim ticks, player walks", async ({ page }) => {
   };
   expect(before.z - after.z).toBeGreaterThan(0.8);
 
+  // PR3: jump — Space sends the player up ~1m and gravity brings them back;
+  // the wasm event ring reports JUMP (1) then LAND (2).
+  const y0 = (await page.evaluate(() => (window.__ww!.query("player") as { y: number }).y)) as number;
+  await page.evaluate(() => window.__ww!.press("Space", 80));
+  await page.waitForFunction(
+    (base) => (window.__ww!.query("player") as { y: number }).y > base + 0.4,
+    y0,
+    { timeout: 3_000 },
+  );
+  await page.waitForFunction(
+    (base) => Math.abs((window.__ww!.query("player") as { y: number }).y - base) < 0.15,
+    y0,
+    { timeout: 3_000 },
+  );
+  const eventLog = (await page.evaluate(() => window.__ww!.query("eventLog"))) as number[];
+  const types = [];
+  for (let i = 0; i < eventLog.length; i += 4) types.push(eventLog[i]);
+  expect(types).toContain(1); // JUMP
+  expect(types).toContain(2); // LAND
+
   // World actually meshed: 9 terrain chunks alone are ~295k triangles, and
   // Times Square building tiles add meshes on top.
   const render = (await page.evaluate(() => window.__ww!.query("render"))) as {

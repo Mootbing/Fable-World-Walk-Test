@@ -33,11 +33,14 @@ Dev server runs on **port 3001** (3000 belongs to another app on this machine).
   boots offline on its own port, `window.__ww` (`ready/query/cmd/press`)
   drives it; asserts ready, sim ticking, W walks north, world meshed
   (≥9 meshes, >100k tris), zero page errors, screenshot artifact.
-- [ ] **PR3 `feat: player physics in Rust`** — heightfield upload
-  (`load_heightfield`, 256² f32 + origin/size on tile load/unload, pre-init
-  queue in bridge), gravity + jump (Space) + fall tracking in `sim/src/player.rs`,
-  input bitfield + event ring buffer protocol; player rendered from entity 0;
-  `engine/player.ts` deleted. *Accept:* feel unchanged, jump works, ledges fall.
+- [x] **PR3 `feat: player physics in Rust`** — heightfield upload on tile
+  load/unload (registry mirror hooks + pre-init queue), gravity + jump
+  (Space) + ledge falls in `sim/src/player.rs` (ports the TS step clamp and
+  ground low-pass), input bitfield + event ring protocol (JUMP/LAND), player
+  written as entity 0; `engine/player.ts` deleted; TS building collision kept
+  via per-frame correction writeback until PR4. *Verified:* 15 Rust tests
+  (jump arc apex ≈1 m, cliff detach, determinism), smoke asserts jump+events
+  in-browser.
 - [ ] **PR4 `feat: building collision in Rust`** — port spatial hash + circle
   pushout (incl. rowhouse rescue) to `sim/src/collision.rs`; footprints
   uploaded per tile; TS `collision.ts` slims to camera-occlusion oracle

@@ -1,11 +1,11 @@
 import init, { Sim } from "@/sim/pkg/sim";
-import { ENTITY_STRIDE } from "./entityLayout";
+import { ENTITY_STRIDE, EVENT_WORDS } from "./entityLayout";
 
 /**
  * Owns the wasm sim instance and all views into its linear memory. Views are
  * recreated on every access: wasm memory growth detaches ArrayBuffers, so a
  * cached view can silently go stale. Pointers from Rust are byte offsets;
- * Float32Array lengths are in elements — keep that math in here only.
+ * typed-array lengths are in elements — keep that math in here only.
  */
 export class SimBridge {
   lastStepMs = 0;
@@ -15,16 +15,69 @@ export class SimBridge {
     private readonly memory: WebAssembly.Memory,
   ) {}
 
-  static async boot(seed: number): Promise<SimBridge> {
+  static async boot(seed: number, spawnX = 0, spawnZ = 0): Promise<SimBridge> {
     const out = await init({ module_or_path: "/sim_bg.wasm" });
-    const sim = new Sim(BigInt(seed), 0, 0);
+    const sim = new Sim(BigInt(seed), spawnX, spawnZ);
     return new SimBridge(sim, out.memory);
+  }
+
+  // ---- streamed world data ----
+
+  loadHeightfield(
+    tx: number,
+    ty: number,
+    originX: number,
+    originZ: number,
+    size: number,
+    field: Float32Array,
+  ): void {
+    this.sim.load_heightfield(tx, ty, originX, originZ, size, field);
+  }
+
+  unloadHeightfield(tx: number, ty: number): void {
+    this.sim.unload_heightfield(tx, ty);
+  }
+
+  // ---- player ----
+
+  setPlayerEnabled(enabled: boolean): void {
+    this.sim.set_player_enabled(enabled);
+  }
+
+  /** Collision-corrected position writeback (TS collision until PR4). */
+  setPlayerPos(x: number, z: number): void {
+    this.sim.set_player_pos(x, z);
+  }
+
+  playerPos(): { x: number; y: number; z: number } {
+    return { x: this.sim.player_x(), y: this.sim.player_y(), z: this.sim.player_z() };
+  }
+
+  // ---- per-frame ----
+
+  setInput(buttons: number, moveX: number, moveZ: number, aimYaw = 0, aimPitch = 0): void {
+    this.sim.set_input(buttons, moveX, moveZ, aimYaw, aimPitch);
   }
 
   step(dt: number): void {
     const t0 = performance.now();
     this.sim.step(dt);
     this.lastStepMs = performance.now() - t0;
+  }
+
+  /**
+   * Events from the last step() as 4-word records [type, a, b, c].
+   * Returns a copy (the wasm-side buffer is reused next step).
+   */
+  drainEvents(): Uint32Array {
+    const count = this.sim.events_count();
+    if (count === 0) return new Uint32Array(0);
+    return new Uint32Array(
+      this.memory.buffer.slice(
+        this.sim.events_ptr(),
+        this.sim.events_ptr() + count * EVENT_WORDS * 4,
+      ),
+    );
   }
 
   get tick(): number {
@@ -44,8 +97,8 @@ export class SimBridge {
   }
 
   /**
-   * PR1 acceptance benchmark: time a full readback pass (fresh view + touch
-   * every lane) over `n` live entities. Returns average ms per pass.
+   * Readback benchmark: time a full pass (fresh view + touch every lane)
+   * over `n` live entities. Returns average ms per pass.
    */
   benchmark(n: number, passes = 100): number {
     this.sim.bench_spawn(n);

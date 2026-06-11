@@ -56,6 +56,15 @@ export function sampleBilinear(field: Float32Array, u: number, v: number): numbe
 export class HeightFieldRegistry {
   private fields = new Map<string, Float32Array>();
 
+  /**
+   * Mirror hooks: the engine wires these to the wasm sim so every decoded
+   * tile is uploaded (with its world frame) the moment it lands, and
+   * removed when the chunk unloads. Set after construction to avoid a
+   * dependency cycle with the bridge.
+   */
+  onSet: ((tx: number, ty: number, originX: number, originZ: number, size: number, field: Float32Array) => void) | null = null;
+  onDelete: ((tx: number, ty: number) => void) | null = null;
+
   constructor(private anchor: WorldAnchor) {}
 
   private key(tx: number, ty: number): string {
@@ -64,10 +73,16 @@ export class HeightFieldRegistry {
 
   set(tx: number, ty: number, field: Float32Array): void {
     this.fields.set(this.key(tx, ty), field);
+    if (this.onSet) {
+      const zoom = CONFIG.terrainZoom;
+      const nw = this.anchor.tileNWWorld(tx, ty, zoom);
+      this.onSet(tx, ty, nw.x, nw.z, this.anchor.tileWorldSize(zoom), field);
+    }
   }
 
   delete(tx: number, ty: number): void {
     this.fields.delete(this.key(tx, ty));
+    this.onDelete?.(tx, ty);
   }
 
   has(tx: number, ty: number): boolean {

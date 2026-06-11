@@ -6,33 +6,58 @@ import { HeightFieldRegistry } from "./heightField";
 import { CollisionWorld } from "./collision";
 import { ChunkManager } from "./chunkManager";
 import { BuildingManager } from "./buildingManager";
-import { Player, MoveInput } from "./player";
 import { SimBridge } from "./sim/simBridge";
+import { BTN } from "./sim/entityLayout";
 import { useHud } from "./store";
+
+export interface MoveInput {
+  dirX: number;
+  dirZ: number;
+  moving: boolean;
+  sprint: boolean;
+  jump: boolean;
+}
 
 const DIFF_INTERVAL = 0.25;
 const HUD_INTERVAL = 0.25;
 /** Open the world even if buildings haven't finished after this long. */
 const READY_TIMEOUT = 15;
+/** Test/debug event log capacity (4-word records, newest last). */
+const EVENT_LOG_CAP = 64;
+
+interface PendingTile {
+  tx: number;
+  ty: number;
+  originX: number;
+  originZ: number;
+  size: number;
+  field: Float32Array;
+}
 
 /**
- * Root of the imperative world: owns the streaming managers, collision,
- * and the player; ticked once per rendered frame from useFrame. React only
- * ever sees `group` (mounted via <primitive>) and the zustand HUD store.
+ * Root of the imperative world: owns the streaming managers and the wasm
+ * sim that owns all gameplay state (the player lives in Rust as entity 0);
+ * ticked once per rendered frame from useFrame. React only ever sees
+ * `group` (mounted via <primitive>) and the zustand HUD store.
  */
 export class WorldEngine {
   readonly group = new THREE.Group();
   readonly anchor: WorldAnchor;
-  readonly player: Player;
   disposed = false;
   /** Wasm sim core; null until async boot resolves (or if it fails). */
   sim: SimBridge | null = null;
+  /** Recent sim events for tests/debug (flat 4-word records, newest last). */
+  readonly eventLog: number[] = [];
 
   private queue: FetchQueue;
   private heights: HeightFieldRegistry;
   private collision = new CollisionWorld();
   private chunks: ChunkManager;
   private buildings: BuildingManager;
+
+  /** Heightfields decoded before the wasm module finished booting. */
+  private pendingTiles = new Map<string, PendingTile>();
+  private playerCache = { x: 0, y: 40, z: 0 };
 
   private diffTimer = DIFF_INTERVAL; // run the first diff immediately
   private hudTimer = 0;
@@ -50,16 +75,37 @@ export class WorldEngine {
     this.chunks = new ChunkManager(this.anchor, this.queue, this.heights);
     this.buildings = new BuildingManager(this.anchor, this.queue, this.heights, this.collision);
     this.group.add(this.chunks.group, this.buildings.group);
-    // Spawn point is the anchor origin by construction.
-    this.player = new Player(this.heights, this.collision, 0, 0);
+
+    // Every decoded heightfield mirrors into the sim (queued until boot).
+    this.heights.onSet = (tx, ty, originX, originZ, size, field) => {
+      if (this.sim) {
+        this.sim.loadHeightfield(tx, ty, originX, originZ, size, field);
+      } else {
+        this.pendingTiles.set(`${tx}/${ty}`, { tx, ty, originX, originZ, size, field });
+      }
+    };
+    this.heights.onDelete = (tx, ty) => {
+      if (this.sim) {
+        this.sim.unloadHeightfield(tx, ty);
+      } else {
+        this.pendingTiles.delete(`${tx}/${ty}`);
+      }
+    };
+
     void this.bootSim();
   }
 
-  /**
-   * Boots the wasm sim alongside the streaming world. PR1: the sim only
-   * ticks and proves the readback path; gameplay still lives in TS. Failure
-   * is non-fatal here — that changes once player physics moves in (PR3).
-   */
+  /** Player position (sim-owned; cached per frame). Spawn pose pre-boot. */
+  get playerX(): number {
+    return this.playerCache.x;
+  }
+  get playerY(): number {
+    return this.playerCache.y;
+  }
+  get playerZ(): number {
+    return this.playerCache.z;
+  }
+
   private async bootSim(): Promise<void> {
     try {
       const sim = await SimBridge.boot(CONFIG.seed);
@@ -68,6 +114,10 @@ export class WorldEngine {
         return;
       }
       this.sim = sim;
+      for (const t of this.pendingTiles.values()) {
+        sim.loadHeightfield(t.tx, t.ty, t.originX, t.originZ, t.size, t.field);
+      }
+      this.pendingTiles.clear();
       const avgMs = sim.benchmark(1000);
       console.info(
         `[sim] v${SimBridge.version} booted · 1k-entity readback ${avgMs.toFixed(3)} ms/pass`,
@@ -82,26 +132,48 @@ export class WorldEngine {
     if (this.disposed) return;
     this.elapsed += dt;
 
-    this.player.update(input, dt);
-    this.sim?.step(dt);
+    if (this.sim) {
+      const buttons = (input.sprint ? BTN.sprint : 0) | (input.jump ? BTN.jump : 0);
+      this.sim.setInput(buttons, input.moving ? input.dirX : 0, input.moving ? input.dirZ : 0);
+      this.sim.step(dt);
+
+      // Building collision stays TS-side until the spatial hash ports to
+      // Rust (PR4): push the sim's proposed position out of footprints and
+      // write the correction back.
+      const p = this.sim.playerPos();
+      const resolved = this.collision.resolve(p.x, p.z, CONFIG.playerRadius);
+      if (resolved.x !== p.x || resolved.z !== p.z) {
+        this.sim.setPlayerPos(resolved.x, resolved.z);
+        p.x = resolved.x;
+        p.z = resolved.z;
+      }
+      this.playerCache = p;
+
+      const events = this.sim.drainEvents();
+      if (events.length > 0) {
+        for (const word of events) this.eventLog.push(word);
+        const excess = this.eventLog.length - EVENT_LOG_CAP * 4;
+        if (excess > 0) this.eventLog.splice(0, excess);
+      }
+    }
 
     this.diffTimer += dt;
     if (this.diffTimer >= DIFF_INTERVAL) {
       this.diffTimer = 0;
-      this.chunks.update(this.player.x, this.player.z);
-      this.buildings.update(this.player.x, this.player.z);
+      this.chunks.update(this.playerX, this.playerZ);
+      this.buildings.update(this.playerX, this.playerZ);
     }
     this.buildings.processBuildQueue();
 
-    if (!this.ready) {
-      const groundLoaded = this.heights.sample(this.player.x, this.player.z) !== null;
+    if (!this.ready && this.sim) {
+      const groundLoaded = this.heights.sample(this.playerX, this.playerZ) !== null;
       const buildingsSettled =
-        this.buildings.isLiveAt(this.player.x, this.player.z) ||
+        this.buildings.isLiveAt(this.playerX, this.playerZ) ||
         this.buildings.failed ||
         this.elapsed > READY_TIMEOUT;
       if (groundLoaded && buildingsSettled) {
         this.ready = true;
-        this.player.enabled = true;
+        this.sim.setPlayerEnabled(true);
         useHud.setState({ ready: true });
       }
     }
@@ -117,11 +189,11 @@ export class WorldEngine {
     this.hudTimer += dt;
     if (this.hudTimer >= HUD_INTERVAL) {
       this.hudTimer = 0;
-      const { lon, lat } = this.anchor.worldToLonLat(this.player.x, this.player.z);
+      const { lon, lat } = this.anchor.worldToLonLat(this.playerX, this.playerZ);
       useHud.setState({
         lat,
         lon,
-        elev: this.player.y - CONFIG.eyeHeight,
+        elev: this.playerY - CONFIG.eyeHeight,
         chunks: this.chunks.liveCount,
         buildingsNote: this.buildings.failed ? "building data unavailable" : "",
         simTick: this.sim ? this.sim.tick : 0,
