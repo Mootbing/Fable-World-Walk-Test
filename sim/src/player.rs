@@ -47,6 +47,7 @@ impl Player {
         }
     }
 
+    /// Returns the landing impact speed when this substep touched down.
     pub fn substep(
         &mut self,
         input: &Input,
@@ -54,7 +55,7 @@ impl Player {
         collision: &CollisionWorld,
         events: &mut Events,
         dt: f64,
-    ) {
+    ) -> Option<f64> {
         let moving = input.move_len() > 1e-6;
         if self.enabled && moving {
             let speed = if input.is_down(BTN_SPRINT) {
@@ -74,16 +75,31 @@ impl Player {
             self.gait += step;
             self.yaw = (-(input.move_x as f64)).atan2(-(input.move_z as f64));
         }
-        self.update_vertical(input, events, heights, dt);
+        self.update_vertical(input, events, heights, dt)
     }
 
-    fn update_vertical(&mut self, input: &Input, events: &mut Events, heights: &HeightGrid, dt: f64) {
+    fn update_vertical(
+        &mut self,
+        input: &Input,
+        events: &mut Events,
+        heights: &HeightGrid,
+        dt: f64,
+    ) -> Option<f64> {
         if let Some(g) = heights.sample(self.x, self.z) {
             self.last_ground = Some(g);
         }
         let Some(last) = self.last_ground else {
-            return; // nothing decoded under us yet: hold position in the air
+            return None; // nothing decoded under us yet: hold in the air
         };
+        // First ground ever (world just streamed in under our boot spawn):
+        // snap to it rather than falling 20m onto the pavement.
+        if self.smooth_ground.is_none() {
+            self.smooth_ground = Some(last);
+            self.y = last + EYE_HEIGHT;
+            self.vel_y = 0.0;
+            self.grounded = true;
+            return None;
+        }
         let smooth = match self.smooth_ground {
             // Low-pass softens DEM stair-steps while walking; while airborne
             // track raw ground so the landing floor is accurate.
@@ -116,8 +132,10 @@ impl Player {
                 self.vel_y = 0.0;
                 self.grounded = true;
                 events.push(EV_LAND, (impact as f32).to_bits(), 0, 0);
+                return Some(impact);
             }
         }
+        None
     }
 }
 

@@ -25,6 +25,10 @@ interface HudState {
   mapOpen: boolean;
   /** Area-name toast (set on neighborhood change; component fades it). */
   areaToast: string;
+  health: number;
+  armor: number;
+  money: number;
+  dead: boolean;
   /** Game clock HH:MM. */
   clock: string;
 }
@@ -50,4 +54,8 @@ export const useHud = create<HudState>(() => ({
   mapOpen: false,
   areaToast: "",
   clock: "12:00",
+  health: 100,
+  armor: 0,
+  money: 0,
+  dead: false,
 }));

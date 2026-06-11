@@ -31,6 +31,7 @@ export const ENTITY_TYPE = {
   vehicle: 2,
   police: 3,
   policePed: 4,
+  pickup: 5,
 } as const;
 
 export const STATE_FLAG = {

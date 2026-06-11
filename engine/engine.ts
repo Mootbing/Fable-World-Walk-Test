@@ -11,6 +11,7 @@ import { BTN } from "./sim/entityLayout";
 import { PlayerAvatar } from "./render/playerAvatar";
 import { VehiclePools } from "./render/vehiclePools";
 import { PedPools } from "./render/pedPools";
+import { PickupPools } from "./render/pickupPools";
 import { KITS } from "./render/vehicleKits";
 import { RoadDebugOverlay } from "./render/roadDebugOverlay";
 import { extractRoadTile, RoadTile } from "./roads";
@@ -66,6 +67,7 @@ export class WorldEngine {
   readonly avatar = new PlayerAvatar();
   readonly vehiclePools = new VehiclePools();
   readonly pedPools = new PedPools();
+  readonly pickupPools = new PickupPools();
   readonly roadDebug = new RoadDebugOverlay();
   /** Per-tile road polylines (minimap + sim upload share this). */
   readonly roadTiles = new Map<string, RoadTile>();
@@ -120,6 +122,7 @@ export class WorldEngine {
       this.avatar.group,
       this.vehiclePools.group,
       this.pedPools.group,
+      this.pickupPools.group,
     );
 
     // Every decoded heightfield mirrors into the sim (queued until boot).
@@ -250,6 +253,7 @@ export class WorldEngine {
       this.avatar.update(this.sim.entityView(), this.sim.entityViewU32(), this.elapsed);
       this.vehiclePools.update(this.sim.entityView(), this.sim.entityViewU32());
       this.pedPools.update(this.sim.entityView(), this.sim.entityViewU32());
+      this.pickupPools.update(this.sim.entityView(), this.sim.entityViewU32(), this.elapsed);
 
       if (input.toggleRoadDebug) this.roadDebug.toggle();
       this.roadDebug.update(
@@ -321,6 +325,7 @@ export class WorldEngine {
         clock: `${String(Math.floor(this.clockMinutes / 60)).padStart(2, "0")}:${String(
           Math.floor(this.clockMinutes % 60),
         ).padStart(2, "0")}`,
+        ...(this.sim ? this.sim.playerStats() : {}),
       });
       const area = resolveArea(this.placeTiles.values(), this.playerX, this.playerZ);
       if (area && area !== this.currentArea) {
@@ -408,6 +413,7 @@ export class WorldEngine {
     this.avatar.dispose();
     this.vehiclePools.dispose();
     this.pedPools.dispose();
+    this.pickupPools.dispose();
     this.roadDebug.dispose();
     this.sim?.dispose();
     this.sim = null;

@@ -239,3 +239,61 @@ body {
   text-shadow: 0 1px 6px rgba(0, 0, 0, 0.6);
   pointer-events: none;
 }
+
+.money {
+  position: fixed;
+  right: 28px;
+  top: 42px;
+  color: #7fd98a;
+  font: 700 18px/1 ui-monospace, monospace;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
+
+.vitals {
+  position: fixed;
+  left: 24px;
+  bottom: 248px;
+  width: 216px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  pointer-events: none;
+}
+
+.bar {
+  height: 7px;
+  border-radius: 3px;
+  background: rgba(10, 14, 20, 0.6);
+  overflow: hidden;
+}
+
+.bar > div {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.25s ease;
+}
+
+.bar.health > div { background: #4cae57; }
+.bar.armor > div { background: #5b8fd9; }
+
+.wasted {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(8, 4, 6, 0.55);
+  color: #b03038;
+  font: 900 72px/1 Georgia, serif;
+  letter-spacing: 0.25em;
+  text-shadow: 0 4px 24px rgba(0, 0, 0, 0.9);
+  pointer-events: none;
+  animation: wasted-in 0.8s ease;
+  z-index: 15;
+}
+
+@keyframes wasted-in {
+  from { opacity: 0; transform: scale(1.15); }
+  to { opacity: 1; transform: scale(1); }
+}

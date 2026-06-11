@@ -295,6 +295,46 @@ test("boots from fixtures, sim ticks, player walks", async ({ page }) => {
   };
   expect(hud15.clock).toMatch(/^\d{2}:\d{2}$/);
 
+  // PR16: stats — money pickup collects; lethal damage shows WASTED and
+  // respawns at spawn minus the hospital fee.
+  const stats0 = (await page.evaluate(() => window.__ww!.query("stats"))) as {
+    health: number;
+    money: number;
+  };
+  expect(stats0.health).toBe(100);
+  const playerNow = (await page.evaluate(() => window.__ww!.query("player"))) as {
+    x: number;
+    z: number;
+  };
+  await page.evaluate(
+    ([x, z]) => window.__ww!.cmd("spawnPickup", x, z, 2, 60),
+    [playerNow.x, playerNow.z] as [number, number],
+  );
+  await page.waitForFunction(
+    (m0) => (window.__ww!.query("stats") as { money: number }).money === m0 + 60,
+    stats0.money,
+    { timeout: 5_000 },
+  );
+  await page.evaluate(() => window.__ww!.cmd("damage", 250));
+  await page.waitForFunction(
+    () => (window.__ww!.query("stats") as { dead: boolean }).dead === true,
+    undefined,
+    { timeout: 3_000 },
+  );
+  await expect(page.locator(".wasted")).toBeVisible();
+  await page.screenshot({ path: "test-results/wasted.png" });
+  await page.waitForFunction(
+    () => (window.__ww!.query("stats") as { dead: boolean }).dead === false,
+    undefined,
+    { timeout: 15_000 },
+  );
+  const stats1 = (await page.evaluate(() => window.__ww!.query("stats"))) as {
+    health: number;
+    money: number;
+  };
+  expect(stats1.health).toBe(100);
+  expect(stats1.money).toBe(stats0.money + 60 - 100);
+
   // World actually meshed: 9 terrain chunks alone are ~295k triangles, and
   // Times Square building tiles add meshes on top.
   const render = (await page.evaluate(() => window.__ww!.query("render"))) as {
