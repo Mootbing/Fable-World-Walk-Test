@@ -10,6 +10,7 @@ import { SimBridge, flattenFootprints, FlatFootprints } from "./sim/simBridge";
 import { BTN } from "./sim/entityLayout";
 import { PlayerAvatar } from "./render/playerAvatar";
 import { VehiclePools } from "./render/vehiclePools";
+import { PedPools } from "./render/pedPools";
 import { KITS } from "./render/vehicleKits";
 import { RoadDebugOverlay } from "./render/roadDebugOverlay";
 import { extractRoadTile, RoadTile } from "./roads";
@@ -62,6 +63,7 @@ export class WorldEngine {
   /** Visible player body (third person only). */
   readonly avatar = new PlayerAvatar();
   readonly vehiclePools = new VehiclePools();
+  readonly pedPools = new PedPools();
   readonly roadDebug = new RoadDebugOverlay();
   /** Per-tile road polylines (minimap + sim upload share this). */
   readonly roadTiles = new Map<string, RoadTile>();
@@ -103,6 +105,7 @@ export class WorldEngine {
       this.buildings.group,
       this.avatar.group,
       this.vehiclePools.group,
+      this.pedPools.group,
     );
 
     // Every decoded heightfield mirrors into the sim (queued until boot).
@@ -227,6 +230,7 @@ export class WorldEngine {
         : null;
       this.avatar.update(this.sim.entityView(), this.sim.entityViewU32(), this.elapsed);
       this.vehiclePools.update(this.sim.entityView(), this.sim.entityViewU32());
+      this.pedPools.update(this.sim.entityView(), this.sim.entityViewU32());
 
       if (input.toggleRoadDebug) this.roadDebug.toggle();
       this.roadDebug.update(
@@ -327,6 +331,7 @@ export class WorldEngine {
     this.buildings.disposeAll();
     this.avatar.dispose();
     this.vehiclePools.dispose();
+    this.pedPools.dispose();
     this.roadDebug.dispose();
     this.sim?.dispose();
     this.sim = null;

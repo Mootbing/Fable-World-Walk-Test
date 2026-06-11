@@ -330,6 +330,32 @@ impl RoadGraph {
     }
 }
 
+/// Point + unit tangent at arc length s along a polyline (clamped to ends).
+pub fn sample_polyline(points: &[(f64, f64)], s: f64) -> (f64, f64, f64, f64) {
+    let mut remaining = s.max(0.0);
+    for w in points.windows(2) {
+        let dx = w[1].0 - w[0].0;
+        let dz = w[1].1 - w[0].1;
+        let len = (dx * dx + dz * dz).sqrt();
+        if len < 1e-9 {
+            continue;
+        }
+        if remaining <= len {
+            let t = remaining / len;
+            return (w[0].0 + dx * t, w[0].1 + dz * t, dx / len, dz / len);
+        }
+        remaining -= len;
+    }
+    let n = points.len();
+    let (dx, dz) = if n >= 2 {
+        (points[n - 1].0 - points[n - 2].0, points[n - 1].1 - points[n - 2].1)
+    } else {
+        (0.0, -1.0)
+    };
+    let len = (dx * dx + dz * dz).sqrt().max(1e-9);
+    (points[n - 1].0, points[n - 1].1, dx / len, dz / len)
+}
+
 fn polyline_len(pts: &[(f64, f64)]) -> f64 {
     pts.windows(2)
         .map(|w| ((w[1].0 - w[0].0).powi(2) + (w[1].1 - w[0].1).powi(2)).sqrt())

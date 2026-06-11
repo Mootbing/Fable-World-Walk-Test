@@ -46,6 +46,8 @@ export function installTestHook(engine: WorldEngine): () => void {
           return engine.sim ? engine.sim.roadStats() : null;
         case "traffic":
           return engine.sim ? engine.sim.trafficCount() : 0;
+        case "peds":
+          return engine.sim ? engine.sim.pedCount() : 0;
         case "anyBraking": {
           if (!engine.sim) return false;
           const u32 = engine.sim.entityViewU32();

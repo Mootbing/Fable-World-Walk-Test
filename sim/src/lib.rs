@@ -5,6 +5,7 @@
 pub mod collision;
 pub mod events;
 pub mod input;
+pub mod peds;
 pub mod player;
 pub mod rng;
 pub mod roads;
@@ -27,6 +28,7 @@ pub const ENTITY_STRIDE: usize = 16;
 pub const MAX_ENTITIES: usize = 1024;
 
 pub const TYPE_PLAYER: u32 = 0;
+pub const TYPE_PED: u32 = 1;
 pub const TYPE_VEHICLE: u32 = 2;
 
 pub const FLAG_GROUNDED: u32 = 1;
@@ -62,6 +64,7 @@ pub struct Sim {
     rng: rng::Pcg32,
     roads: roads::RoadGraph,
     traffic: traffic::Traffic,
+    peds: peds::Peds,
     events: Events,
     /// Preallocated at MAX_ENTITIES so the pointer never moves (no wasm
     /// memory growth from the entity buffer itself).
@@ -91,6 +94,7 @@ impl Sim {
             rng: rng::Pcg32::new(rng::derive_seed(seed, "world", 0, 0)),
             roads: roads::RoadGraph::new(),
             traffic: traffic::Traffic::new(),
+            peds: peds::Peds::new(),
             events: Events::new(),
             entities: vec![0.0; MAX_ENTITIES * ENTITY_STRIDE],
             entity_count: 1, // entity 0 is always the player
@@ -183,10 +187,19 @@ impl Sim {
     pub fn unload_tile_roads(&mut self, tx: i32, ty: i32) {
         let removed = self.roads.unload_tile((tx, ty));
         self.traffic.despawn_edges(&removed);
+        self.peds.despawn_edges(&removed);
     }
 
     pub fn traffic_count(&self) -> u32 {
         self.traffic.count()
+    }
+
+    pub fn ped_count(&self) -> u32 {
+        self.peds.count()
+    }
+
+    pub fn set_ped_target(&mut self, n: u32) {
+        self.peds.target = n;
     }
 
     pub fn set_traffic_target(&mut self, n: u32) {
@@ -361,7 +374,7 @@ impl Sim {
     /// Spawn n synthetic entities (slotted after the player and vehicles)
     /// that move every substep, for measuring JS readback cost at scale.
     pub fn bench_spawn(&mut self, n: u32) {
-        let used = 1 + self.vehicles.len() + self.traffic.cars.len();
+        let used = 1 + self.vehicles.len() + self.traffic.cars.len() + self.peds.count() as usize;
         let n = (n as usize).min(MAX_ENTITIES.saturating_sub(used));
         self.bench_count = n as u32;
         self.entity_count = (used + n) as u32;
@@ -425,22 +438,39 @@ impl Sim {
         }
 
         // Ambient traffic on the road graph.
+        let crossing: Vec<(f64, f64)> = self
+            .peds
+            .peds
+            .iter()
+            .filter(|p| p.crossing())
+            .map(|p| (p.x, p.z))
+            .collect();
         let player_vehicle = self.driving.map(|i| &self.vehicles[i]);
         self.traffic.substep(
             &self.roads,
             &self.heights,
             (self.player.x, self.player.z),
             player_vehicle,
+            &crossing,
             &mut self.rng,
             self.time,
             SUBSTEP,
         );
         self.resolve_player_vs_traffic();
 
+        self.peds.substep(
+            &self.roads,
+            &self.heights,
+            &self.collision,
+            (self.player.x, self.player.z),
+            &mut self.rng,
+            SUBSTEP,
+        );
+
         self.input.tick();
 
         let t = self.time as f32;
-        let bench_base = 1 + self.vehicles.len() + self.traffic.cars.len();
+        let bench_base = 1 + self.vehicles.len() + self.traffic.cars.len() + self.peds.count() as usize;
         for i in 0..self.bench_count as usize {
             let base = (bench_base + i) * ENTITY_STRIDE;
             let angle = t * 0.5 + i as f32 * 0.618;
@@ -628,7 +658,32 @@ impl Sim {
             e[14] = f32::from_bits(if c.braking { FLAG_BRAKING } else { 0 });
         }
 
+        // then pedestrians
+        let ped_base = traffic_base + self.traffic.cars.len();
+        for (slot, p) in self.peds.peds.iter().enumerate() {
+            let base = (ped_base + slot) * ENTITY_STRIDE;
+            if base + ENTITY_STRIDE > self.entities.len() {
+                break;
+            }
+            let half_yaw = (p.yaw / 2.0) as f32;
+            let e = &mut self.entities[base..base + ENTITY_STRIDE];
+            e[0] = p.x as f32;
+            e[1] = p.y as f32;
+            e[2] = p.z as f32;
+            e[3] = 0.0;
+            e[4] = half_yaw.sin();
+            e[5] = 0.0;
+            e[6] = half_yaw.cos();
+            e[7] = p.speed as f32;
+            e[8] = ((p.gait / STRIDE) % 1.0) as f32;
+            e[11] = 1.0;
+            e[12] = f32::from_bits(p.id);
+            e[13] = f32::from_bits(TYPE_PED << 16 | p.variant);
+            e[14] = f32::from_bits(FLAG_GROUNDED);
+        }
+
         self.entity_count = (1 + self.vehicles.len() + self.traffic.cars.len()
+            + self.peds.count() as usize
             + self.bench_count as usize)
             .min(MAX_ENTITIES) as u32;
     }

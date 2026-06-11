@@ -175,6 +175,14 @@ export class SimBridge {
     this.sim.set_traffic_target(n);
   }
 
+  pedCount(): number {
+    return this.sim.ped_count();
+  }
+
+  setPedTarget(n: number): void {
+    this.sim.set_ped_target(n);
+  }
+
   nearestVehicleDist(): number {
     return this.sim.nearest_vehicle_dist();
   }

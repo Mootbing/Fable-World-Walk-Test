@@ -206,6 +206,13 @@ test("boots from fixtures, sim ticks, player walks", async ({ page }) => {
     timeout: 20_000,
   });
 
+  // PR11: pedestrians stroll the sidewalks (sim count + still rendering
+  // through 4 instanced pools — covered by the constant-mesh assertion).
+  await page.waitForFunction(() => (window.__ww!.query("peds") as number) >= 5, undefined, {
+    timeout: 30_000,
+  });
+  await page.screenshot({ path: "test-results/peds.png" });
+
   // World actually meshed: 9 terrain chunks alone are ~295k triangles, and
   // Times Square building tiles add meshes on top.
   const render = (await page.evaluate(() => window.__ww!.query("render"))) as {

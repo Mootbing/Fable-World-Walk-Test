@@ -116,8 +116,15 @@ Dev server runs on **port 3001** (3000 belongs to another app on this machine).
 
 ## Phase 3 — Living city
 
-- [ ] **PR11 `feat: pedestrians v1`** — sidewalk offsets from road graph,
-  wander + separation, building collision, traffic brakes for crossing peds.
+- [x] **PR11 `feat: pedestrians v1`** — `sim/src/peds.rs`: rail-walkers on
+  class-based sidewalk offsets (no motorway/trunk), personal lateral
+  jitter + walk speeds, speed-matching personal space, corner crossings as
+  straight segments between rails (traffic hard-brakes for crossers in the
+  lane corridor — never closer than 1.5 m in tests), building pushout,
+  spawn annulus 60–200 m / despawn 250 m; rendered via 4 instanced pools
+  (torso/head/arm/leg, shirt palette via instanceColor, gait swing from
+  the animPhase lane). *Verified:* 45 Rust tests; smoke: ≥5 peds strolling
+  real sidewalks.
 - [ ] **PR12 `feat: ped/vehicle interactions + carjacking + horn`** — traffic
   drivers, E yanks driver (flee), horn (H) scatters, vehicle-vs-ped knockdown.
 - [ ] **PR13 `feat: radar minimap`** — canvas radar from road polylines,
