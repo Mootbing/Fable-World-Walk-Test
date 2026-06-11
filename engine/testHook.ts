@@ -57,8 +57,16 @@ export function installTestHook(engine: WorldEngine): () => void {
           return undefined;
       }
     },
-    cmd: (name) => {
+    cmd: (name, ...args) => {
       switch (name) {
+        // Resolve a circle against the wasm collision world; returns the
+        // pushed-out position so tests can prove walls exist as data.
+        case "probeCollision": {
+          const [x, z] = args as [number, number];
+          if (!engine.sim) return null;
+          const out = engine.sim.resolveProbe(x, z, 0.35);
+          return { ...out, moved: Math.hypot(out.x - x, out.z - z) > 1e-6 };
+        }
         // Store-level lock: enables movement input without real pointer
         // lock (headless browsers can't gesture). Camera stays put, which
         // is exactly what a deterministic test wants.

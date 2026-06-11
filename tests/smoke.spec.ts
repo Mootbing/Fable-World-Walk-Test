@@ -58,6 +58,18 @@ test("boots from fixtures, sim ticks, player walks", async ({ page }) => {
   expect(types).toContain(1); // JUMP
   expect(types).toContain(2); // LAND
 
+  // PR4: building collision lives in the wasm sim — probing west from the
+  // spawn plaza must hit a footprint (Times Square's west blockfront) that
+  // pushes the circle out, within 250m.
+  const hitWall = await page.evaluate(() => {
+    for (let t = 5; t <= 250; t += 5) {
+      const probe = window.__ww!.cmd("probeCollision", -t, 0) as { moved: boolean } | null;
+      if (probe?.moved) return t;
+    }
+    return 0;
+  });
+  expect(hitWall).toBeGreaterThan(0);
+
   // World actually meshed: 9 terrain chunks alone are ~295k triangles, and
   // Times Square building tiles add meshes on top.
   const render = (await page.evaluate(() => window.__ww!.query("render"))) as {

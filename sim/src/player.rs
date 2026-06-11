@@ -2,6 +2,7 @@
 //! engine/player.ts kinematics (step clamp, low-passed ground follow), plus
 //! what TS never had: gravity, jumping, and ledge falls.
 
+use crate::collision::CollisionWorld;
 use crate::events::{Events, EV_JUMP, EV_LAND};
 use crate::input::{Input, BTN_JUMP, BTN_SPRINT};
 use crate::terrain::HeightGrid;
@@ -46,7 +47,14 @@ impl Player {
         }
     }
 
-    pub fn substep(&mut self, input: &Input, heights: &HeightGrid, events: &mut Events, dt: f64) {
+    pub fn substep(
+        &mut self,
+        input: &Input,
+        heights: &HeightGrid,
+        collision: &CollisionWorld,
+        events: &mut Events,
+        dt: f64,
+    ) {
         let moving = input.move_len() > 1e-6;
         if self.enabled && moving {
             let speed = if input.is_down(BTN_SPRINT) {
@@ -56,8 +64,13 @@ impl Player {
             };
             // Same wall-tunneling guard as the TS controller had.
             let step = (speed * dt).min(RADIUS * 0.9);
-            self.x += input.move_x as f64 * step;
-            self.z += input.move_z as f64 * step;
+            let (rx, rz) = collision.resolve(
+                self.x + input.move_x as f64 * step,
+                self.z + input.move_z as f64 * step,
+                RADIUS,
+            );
+            self.x = rx;
+            self.z = rz;
             self.gait += step;
             self.yaw = (-(input.move_x as f64)).atan2(-(input.move_z as f64));
         }
@@ -126,9 +139,10 @@ mod tests {
         let mut p = Player::new(0.0, 0.0);
         p.enabled = true;
         let mut ev = Events::new();
+        let cw = CollisionWorld::new();
         let idle = Input::default();
         for _ in 0..120 {
-            p.substep(&idle, hg, &mut ev, DT);
+            p.substep(&idle, hg, &cw, &mut ev, DT);
         }
         ev.clear();
         (p, ev)
@@ -148,15 +162,16 @@ mod tests {
         let (mut p, mut ev) = settled_player(&hg);
         let start_y = p.y;
 
+        let cw = CollisionWorld::new();
         let mut input = Input::default();
         input.buttons = BTN_JUMP;
-        p.substep(&input, &hg, &mut ev, DT); // rising edge -> jump
+        p.substep(&input, &hg, &cw, &mut ev, DT); // rising edge -> jump
         input.tick(); // latch prev_buttons
 
         let mut apex: f64 = p.y;
         let mut landed_at = 0;
         for i in 0..240 {
-            p.substep(&input, &hg, &mut ev, DT);
+            p.substep(&input, &hg, &cw, &mut ev, DT);
             apex = apex.max(p.y);
             if p.grounded {
                 landed_at = i;
@@ -191,9 +206,10 @@ mod tests {
         let mut p = Player::new(-50.0, 0.0);
         p.enabled = true;
         let mut ev = Events::new();
+        let cw = CollisionWorld::new();
         let idle = Input::default();
         for _ in 0..240 {
-            p.substep(&idle, &hg, &mut ev, DT);
+            p.substep(&idle, &hg, &cw, &mut ev, DT);
         }
         assert!((p.y - (50.0 + EYE_HEIGHT)).abs() < 0.1);
 
@@ -203,7 +219,7 @@ mod tests {
         input.move_x = 1.0;
         let mut fell = false;
         for _ in 0..2400 {
-            p.substep(&input, &hg, &mut ev, DT);
+            p.substep(&input, &hg, &cw, &mut ev, DT);
             input.tick();
             if !p.grounded {
                 fell = true;
@@ -215,5 +231,34 @@ mod tests {
         assert!(fell, "never detached from the high ground");
         assert!(p.grounded, "never landed");
         assert!((p.y - EYE_HEIGHT).abs() < 0.5, "landed at {}", p.y);
+    }
+
+    #[test]
+    fn wall_blocks_walking() {
+        let hg = flat_world(0.0);
+        let (mut p, mut ev) = settled_player(&hg);
+        let mut cw = CollisionWorld::new();
+        // Wall face at x = 5, extending east.
+        cw.add_tile(
+            (0, 0),
+            vec![crate::collision::Footprint {
+                rings: vec![vec![
+                    [5.0, -50.0],
+                    [60.0, -50.0],
+                    [60.0, 50.0],
+                    [5.0, 50.0],
+                    [5.0, -50.0],
+                ]],
+            }],
+        );
+        let mut input = Input::default();
+        input.buttons = BTN_SPRINT;
+        input.move_x = 1.0; // sprint east into the wall
+        for _ in 0..600 {
+            p.substep(&input, &hg, &cw, &mut ev, DT);
+            input.tick();
+        }
+        assert!(p.x <= 5.0 - RADIUS + 0.02, "penetrated to x={}", p.x);
+        assert!(p.x > 4.0, "should have reached the wall, x={}", p.x);
     }
 }

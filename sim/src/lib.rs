@@ -2,12 +2,14 @@
 //! data in (tiles) and reads entity transforms back each frame as zero-copy
 //! views over wasm memory. See engine/sim/entityLayout.ts for the buffer ABI.
 
+pub mod collision;
 pub mod events;
 pub mod input;
 pub mod player;
 pub mod rng;
 pub mod terrain;
 
+use collision::{CollisionWorld, Footprint};
 use events::Events;
 use input::Input;
 use player::Player;
@@ -39,6 +41,7 @@ pub struct Sim {
     accumulator: f64,
     input: Input,
     heights: HeightGrid,
+    collision: CollisionWorld,
     player: Player,
     events: Events,
     /// Preallocated at MAX_ENTITIES so the pointer never moves (no wasm
@@ -61,6 +64,7 @@ impl Sim {
             accumulator: 0.0,
             input: Input::default(),
             heights: HeightGrid::new(),
+            collision: CollisionWorld::new(),
             player: Player::new(spawn_x, spawn_z),
             events: Events::new(),
             entities: vec![0.0; MAX_ENTITIES * ENTITY_STRIDE],
@@ -90,6 +94,50 @@ impl Sim {
 
     pub fn unload_heightfield(&mut self, tx: i32, ty: i32) {
         self.heights.unload(tx, ty);
+    }
+
+    /// Building footprints for one z14 tile, pre-filtered by JS to those
+    /// that block walking (min_height <= 2.5m). Flat format:
+    ///   coords:       x0,z0,x1,z1,...  absolute world meters (f32)
+    ///   ring_offsets: start VERTEX index of each ring, plus end sentinel
+    ///   feat_offsets: start RING index of each footprint, plus end sentinel
+    pub fn load_tile_buildings(
+        &mut self,
+        tx: i32,
+        ty: i32,
+        coords: &[f32],
+        ring_offsets: &[u32],
+        feat_offsets: &[u32],
+    ) {
+        let mut footprints = Vec::new();
+        if feat_offsets.len() >= 2 {
+            for f in 0..feat_offsets.len() - 1 {
+                let r0 = feat_offsets[f] as usize;
+                let r1 = feat_offsets[f + 1] as usize;
+                let mut rings = Vec::with_capacity(r1 - r0);
+                for r in r0..r1 {
+                    let v0 = ring_offsets[r] as usize;
+                    let v1 = ring_offsets[r + 1] as usize;
+                    let ring: Vec<[f64; 2]> = (v0..v1)
+                        .map(|v| [coords[v * 2] as f64, coords[v * 2 + 1] as f64])
+                        .collect();
+                    rings.push(ring);
+                }
+                footprints.push(Footprint { rings });
+            }
+        }
+        self.collision.add_tile((tx, ty), footprints);
+    }
+
+    pub fn unload_tile_buildings(&mut self, tx: i32, ty: i32) {
+        self.collision.remove_tile((tx, ty));
+    }
+
+    /// Debug/test probe: resolve a circle against the collision world and
+    /// return [resolved_x, resolved_z].
+    pub fn resolve_probe(&self, x: f64, z: f64, r: f64) -> Vec<f64> {
+        let (rx, rz) = self.collision.resolve(x, z, r);
+        vec![rx, rz]
     }
 
     // ---- player control ----
@@ -197,8 +245,13 @@ impl Sim {
     fn substep(&mut self) {
         self.tick += 1;
         self.time += SUBSTEP;
-        self.player
-            .substep(&self.input, &self.heights, &mut self.events, SUBSTEP);
+        self.player.substep(
+            &self.input,
+            &self.heights,
+            &self.collision,
+            &mut self.events,
+            SUBSTEP,
+        );
         self.input.tick();
 
         let t = self.time as f32;

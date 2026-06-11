@@ -6,7 +6,7 @@ import { HeightFieldRegistry } from "./heightField";
 import { CollisionWorld } from "./collision";
 import { ChunkManager } from "./chunkManager";
 import { BuildingManager } from "./buildingManager";
-import { SimBridge } from "./sim/simBridge";
+import { SimBridge, flattenFootprints, FlatFootprints } from "./sim/simBridge";
 import { BTN } from "./sim/entityLayout";
 import { useHud } from "./store";
 
@@ -55,8 +55,9 @@ export class WorldEngine {
   private chunks: ChunkManager;
   private buildings: BuildingManager;
 
-  /** Heightfields decoded before the wasm module finished booting. */
+  /** Tile data that arrived before the wasm module finished booting. */
   private pendingTiles = new Map<string, PendingTile>();
+  private pendingBuildings = new Map<string, { tx: number; ty: number; flat: FlatFootprints }>();
   private playerCache = { x: 0, y: 40, z: 0 };
 
   private diffTimer = DIFF_INTERVAL; // run the first diff immediately
@@ -92,6 +93,23 @@ export class WorldEngine {
       }
     };
 
+    // ...and so does every live building tile's walkable footprint set.
+    this.buildings.onTileBuildings = (tx, ty, features) => {
+      const flat = flattenFootprints(features);
+      if (this.sim) {
+        this.sim.loadTileBuildings(tx, ty, flat);
+      } else {
+        this.pendingBuildings.set(`${tx}/${ty}`, { tx, ty, flat });
+      }
+    };
+    this.buildings.onTileBuildingsRemoved = (tx, ty) => {
+      if (this.sim) {
+        this.sim.unloadTileBuildings(tx, ty);
+      } else {
+        this.pendingBuildings.delete(`${tx}/${ty}`);
+      }
+    };
+
     void this.bootSim();
   }
 
@@ -118,6 +136,10 @@ export class WorldEngine {
         sim.loadHeightfield(t.tx, t.ty, t.originX, t.originZ, t.size, t.field);
       }
       this.pendingTiles.clear();
+      for (const b of this.pendingBuildings.values()) {
+        sim.loadTileBuildings(b.tx, b.ty, b.flat);
+      }
+      this.pendingBuildings.clear();
       const avgMs = sim.benchmark(1000);
       console.info(
         `[sim] v${SimBridge.version} booted · 1k-entity readback ${avgMs.toFixed(3)} ms/pass`,
@@ -136,18 +158,7 @@ export class WorldEngine {
       const buttons = (input.sprint ? BTN.sprint : 0) | (input.jump ? BTN.jump : 0);
       this.sim.setInput(buttons, input.moving ? input.dirX : 0, input.moving ? input.dirZ : 0);
       this.sim.step(dt);
-
-      // Building collision stays TS-side until the spatial hash ports to
-      // Rust (PR4): push the sim's proposed position out of footprints and
-      // write the correction back.
-      const p = this.sim.playerPos();
-      const resolved = this.collision.resolve(p.x, p.z, CONFIG.playerRadius);
-      if (resolved.x !== p.x || resolved.z !== p.z) {
-        this.sim.setPlayerPos(resolved.x, resolved.z);
-        p.x = resolved.x;
-        p.z = resolved.z;
-      }
-      this.playerCache = p;
+      this.playerCache = this.sim.playerPos();
 
       const events = this.sim.drainEvents();
       if (events.length > 0) {
