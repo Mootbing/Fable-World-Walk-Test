@@ -15,11 +15,19 @@ export default function Hud() {
   const simMs = useHud((s) => s.simMs);
   const vehicle = useHud((s) => s.vehicle);
   const toast = useHud((s) => s.toast);
+  const areaToast = useHud((s) => s.areaToast);
+  const clock = useHud((s) => s.clock);
 
   return (
     <>
       {locked && !vehicle && <div className="crosshair" />}
       {locked && toast && <div className="toast">{toast}</div>}
+      {areaToast && (
+        <div key={areaToast} className="area-toast">
+          {areaToast}
+        </div>
+      )}
+      {locked && <div className="clock">{clock}</div>}
       {locked && vehicle && (
         <div className="speedo">
           <span className="speedo-name">{vehicle.name}</span>

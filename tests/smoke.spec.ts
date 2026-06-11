@@ -283,6 +283,18 @@ test("boots from fixtures, sim ticks, player walks", async ({ page }) => {
   await page.evaluate(() => window.__ww!.cmd("lock")); // headless: re-lock manually
   await page.evaluate(() => window.__ww!.cmd("clearWaypoint"));
 
+  // PR15: area-name toast resolved from the real place layer + game clock.
+  await page.waitForFunction(
+    () => ((window.__ww!.query("hud") as { areaToast: string }).areaToast ?? "").length > 0,
+    undefined,
+    { timeout: 15_000 },
+  );
+  const hud15 = (await page.evaluate(() => window.__ww!.query("hud"))) as {
+    areaToast: string;
+    clock: string;
+  };
+  expect(hud15.clock).toMatch(/^\d{2}:\d{2}$/);
+
   // World actually meshed: 9 terrain chunks alone are ~295k triangles, and
   // Times Square building tiles add meshes on top.
   const render = (await page.evaluate(() => window.__ww!.query("render"))) as {

@@ -151,8 +151,13 @@ Dev server runs on **port 3001** (3000 belongs to another app on this machine).
   *Verified:* 50 Rust tests (grid route ≈500 m through the corner,
   oneway refusal, same-edge slice), smoke routes 250 m north on real
   streets + counts magenta radar pixels + M round-trip.
-- [ ] **PR15 `feat: area-name toasts + clock HUD`** — `place` layer →
-  neighborhood fade-toasts; game clock on HUD.
+- [x] **PR15 `feat: area-name toasts + clock HUD`** — `engine/places.ts`
+  extracts the `place` layer (neighbourhood/quarter/suburb, tier-banded
+  nearest match: Hell's Kitchen beats Midtown beats Manhattan); on area
+  change the classic serif fade-toast appears lower-right; game clock
+  (1 real s = 1 game min, drives day/night in PR29) top-right.
+  *Verified:* smoke resolves a real neighborhood name at spawn + clock
+  format. **Phase 3 complete.**
 
 ## Phase 4 — Crime & combat
 

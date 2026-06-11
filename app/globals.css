@@ -210,3 +210,32 @@ body {
   font: 500 13px/1.4 system-ui, sans-serif;
   letter-spacing: 0.03em;
 }
+
+.area-toast {
+  position: fixed;
+  right: 36px;
+  bottom: 64px;
+  color: #e9ddc0;
+  font: italic 700 34px/1.1 Georgia, "Times New Roman", serif;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.85);
+  letter-spacing: 0.01em;
+  pointer-events: none;
+  animation: area-fade 4.5s ease forwards;
+}
+
+@keyframes area-fade {
+  0% { opacity: 0; transform: translateY(10px); }
+  12% { opacity: 1; transform: translateY(0); }
+  78% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+.clock {
+  position: fixed;
+  right: 28px;
+  top: 16px;
+  color: #e8edf4;
+  font: 700 18px/1 ui-monospace, monospace;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}

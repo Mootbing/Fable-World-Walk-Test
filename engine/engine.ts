@@ -14,6 +14,7 @@ import { PedPools } from "./render/pedPools";
 import { KITS } from "./render/vehicleKits";
 import { RoadDebugOverlay } from "./render/roadDebugOverlay";
 import { extractRoadTile, RoadTile } from "./roads";
+import { extractPlaces, resolveArea, Place } from "./places";
 import type { CameraClamp } from "./render/cameraRig";
 import { useHud } from "./store";
 
@@ -68,6 +69,11 @@ export class WorldEngine {
   readonly roadDebug = new RoadDebugOverlay();
   /** Per-tile road polylines (minimap + sim upload share this). */
   readonly roadTiles = new Map<string, RoadTile>();
+  /** Per-tile place points for area-name toasts. */
+  readonly placeTiles = new Map<string, Place[]>();
+  private currentArea = "";
+  /** Game clock in minutes since midnight (1 real second = 1 game minute). */
+  clockMinutes = 12 * 60;
   /** Renderer-reported camera state, for HUD/tests/minimap. */
   camMode: "fp" | "tp" = "fp";
   camPos = { x: 0, y: 0, z: 0 };
@@ -152,6 +158,8 @@ export class WorldEngine {
     // Roads ride in the same MVT bytes: extract, keep for the minimap,
     // and feed the sim's directed graph.
     this.buildings.onTileData = (tx, ty, buf) => {
+      const places = extractPlaces(buf, tx, ty, CONFIG.buildingZoom, this.anchor);
+      if (places.length > 0) this.placeTiles.set(`${tx}/${ty}`, places);
       const roads = extractRoadTile(buf, tx, ty, CONFIG.buildingZoom, this.anchor);
       if (!roads) return;
       this.roadTiles.set(`${tx}/${ty}`, roads);
@@ -162,6 +170,7 @@ export class WorldEngine {
       }
     };
     this.buildings.onTileDataRemoved = (tx, ty) => {
+      this.placeTiles.delete(`${tx}/${ty}`);
       if (!this.roadTiles.delete(`${tx}/${ty}`)) return;
       if (this.sim) {
         this.sim.unloadTileRoads(tx, ty);
@@ -218,6 +227,7 @@ export class WorldEngine {
   update(input: MoveInput, dt: number): void {
     if (this.disposed) return;
     this.elapsed += dt;
+    this.clockMinutes = (this.clockMinutes + dt) % 1440;
 
     if (this.sim) {
       const buttons =
@@ -308,7 +318,15 @@ export class WorldEngine {
               }
             : null,
         toast: nearCar > 0 && nearCar <= 3 ? "Press E to enter the vehicle" : "",
+        clock: `${String(Math.floor(this.clockMinutes / 60)).padStart(2, "0")}:${String(
+          Math.floor(this.clockMinutes % 60),
+        ).padStart(2, "0")}`,
       });
+      const area = resolveArea(this.placeTiles.values(), this.playerX, this.playerZ);
+      if (area && area !== this.currentArea) {
+        this.currentArea = area;
+        useHud.setState({ areaToast: area });
+      }
     }
   }
 

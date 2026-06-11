@@ -23,6 +23,10 @@ interface HudState {
   toast: string;
   /** Full-screen map overlay open. */
   mapOpen: boolean;
+  /** Area-name toast (set on neighborhood change; component fades it). */
+  areaToast: string;
+  /** Game clock HH:MM. */
+  clock: string;
 }
 
 /**
@@ -44,4 +48,6 @@ export const useHud = create<HudState>(() => ({
   vehicle: null,
   toast: "",
   mapOpen: false,
+  areaToast: "",
+  clock: "12:00",
 }));
