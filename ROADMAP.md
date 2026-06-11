@@ -161,8 +161,15 @@ Dev server runs on **port 3001** (3000 belongs to another app on this machine).
 
 ## Phase 4 — Crime & combat
 
-- [ ] **PR16 `feat: health/armor/money/pickups/death+respawn`** — stats in
-  sim, fall damage, pickups (spin/bob), death fade → respawn + fee.
+- [x] **PR16 `feat: health/armor/money/pickups/death+respawn`** —
+  `sim/src/stats.rs` (armor absorbs half, $250 start, $100 hospital fee,
+  3.5 s respawn at spawn), `pickups.rs` (health/armor/money, radius
+  collect, 3 starter pickups, spinning octahedra pool), fall damage above
+  9 m/s landings, death gates all input, WASTED overlay + health/armor
+  bars + money HUD. **Found & fixed: the boot drop (y=40 → ground) would
+  have killed the player at spawn** — first-ever ground contact now snaps
+  instead of falling. *Verified:* 55 Rust tests; smoke collects a pickup,
+  dies (screenshot), respawns minus the fee.
 - [ ] **PR17 `feat: melee combat + ped panic`** — punch combo, soft lock-on,
   knockdown/death + money drop, witness flee broadcast.
 - [ ] **PR18 `feat: ranged combat v1 — pistol`** — weapon slots/ammo, RMB aim

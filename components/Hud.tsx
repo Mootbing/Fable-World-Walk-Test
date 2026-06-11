@@ -17,6 +17,10 @@ export default function Hud() {
   const toast = useHud((s) => s.toast);
   const areaToast = useHud((s) => s.areaToast);
   const clock = useHud((s) => s.clock);
+  const health = useHud((s) => s.health);
+  const armor = useHud((s) => s.armor);
+  const money = useHud((s) => s.money);
+  const dead = useHud((s) => s.dead);
 
   return (
     <>
@@ -28,6 +32,18 @@ export default function Hud() {
         </div>
       )}
       {locked && <div className="clock">{clock}</div>}
+      {locked && <div className="money">{`$${Math.round(money)}`}</div>}
+      {locked && (
+        <div className="vitals">
+          <div className="bar health">
+            <div style={{ width: `${Math.max(0, Math.min(100, health))}%` }} />
+          </div>
+          <div className="bar armor">
+            <div style={{ width: `${Math.max(0, Math.min(100, armor))}%` }} />
+          </div>
+        </div>
+      )}
+      {dead && <div className="wasted">WASTED</div>}
       {locked && vehicle && (
         <div className="speedo">
           <span className="speedo-name">{vehicle.name}</span>

@@ -42,6 +42,8 @@ export function installTestHook(engine: WorldEngine): () => void {
           return engine.avatar.visible;
         case "driving":
           return engine.sim ? engine.sim.driving() : false;
+        case "stats":
+          return engine.sim ? engine.sim.playerStats() : null;
         case "gps":
           return {
             waypoint: engine.waypoint ? { ...engine.waypoint } : null,
@@ -130,6 +132,15 @@ export function installTestHook(engine: WorldEngine): () => void {
         case "roadDebug":
           engine.roadDebug.toggle();
           return engine.roadDebug.visible;
+        case "damage": {
+          const [n] = args as [number];
+          engine.sim?.damagePlayer(n);
+          return true;
+        }
+        case "spawnPickup": {
+          const [x, z, kind, value] = args as [number, number, number, number];
+          return engine.sim ? engine.sim.spawnPickupAt(x, z, kind, value) : 0;
+        }
         case "spawnTraffic": {
           const [x, z, kind] = args as [number, number, number];
           return engine.sim ? engine.sim.debugSpawnTraffic(x, z, 0, kind ?? 0) : 0;

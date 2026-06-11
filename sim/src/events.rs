@@ -17,6 +17,10 @@ pub const EV_HORN: u32 = 6;
 pub const EV_PED_HIT: u32 = 7;
 /// a = new vehicle id.
 pub const EV_CARJACK: u32 = 8;
+pub const EV_PLAYER_DIED: u32 = 9;
+pub const EV_RESPAWN: u32 = 10;
+/// a = pickup kind, b = value (f32 bits).
+pub const EV_PICKUP: u32 = 11;
 
 pub const EVENT_WORDS: usize = 4;
 const MAX_EVENTS: usize = 256;

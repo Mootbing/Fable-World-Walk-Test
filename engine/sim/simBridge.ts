@@ -188,6 +188,23 @@ export class SimBridge {
     this.sim.set_ped_target(n);
   }
 
+  playerStats(): { health: number; armor: number; money: number; dead: boolean } {
+    return {
+      health: this.sim.player_health(),
+      armor: this.sim.player_armor(),
+      money: this.sim.player_money(),
+      dead: this.sim.player_dead(),
+    };
+  }
+
+  damagePlayer(amount: number): void {
+    this.sim.damage_player(amount);
+  }
+
+  spawnPickupAt(x: number, z: number, kind: number, value: number): number {
+    return this.sim.spawn_pickup_at(x, z, kind, value);
+  }
+
   /** Spawn a parked traffic car at an exact spot (debug/tests). */
   debugSpawnTraffic(x: number, z: number, yaw: number, kind: number): number {
     return this.sim.debug_spawn_traffic(x, z, yaw, kind);
