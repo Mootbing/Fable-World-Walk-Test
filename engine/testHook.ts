@@ -34,6 +34,12 @@ export function installTestHook(engine: WorldEngine): () => void {
         case "eventLog":
           // flat 4-word records [type, a, b, c], newest last
           return [...engine.eventLog];
+        case "camMode":
+          return engine.camMode;
+        case "camera":
+          return { ...engine.camPos };
+        case "avatarVisible":
+          return engine.avatar.visible;
         case "hud":
           return useHud.getState();
         case "render": {

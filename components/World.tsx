@@ -1,120 +1,66 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useRef } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { PointerLockControls } from "@react-three/drei";
-import type { PointerLockControls as PointerLockControlsImpl } from "three-stdlib";
 import * as THREE from "three";
 import { WorldEngine } from "@/engine/engine";
 import { CONFIG } from "@/engine/config";
-import { useHud, LOCK_EVENT } from "@/engine/store";
+import { InputManager } from "@/engine/input";
+import { CameraRig } from "@/engine/render/cameraRig";
 import { installTestHook } from "@/engine/testHook";
 
-function Scene({ engine }: { engine: WorldEngine }) {
-  const camera = useThree((s) => s.camera);
-  const keys = useRef<Record<string, boolean>>({});
-  const forward = useMemo(() => new THREE.Vector3(), []);
-  const right = useMemo(() => new THREE.Vector3(), []);
+function Scene({
+  engine,
+  input,
+  rig,
+}: {
+  engine: WorldEngine;
+  input: InputManager;
+  rig: CameraRig;
+}) {
+  const camera = useThree((s) => s.camera) as THREE.PerspectiveCamera;
+  const gl = useThree((s) => s.gl);
 
   useEffect(() => {
-    const down = (e: KeyboardEvent) => {
-      keys.current[e.code] = true;
-    };
-    const up = (e: KeyboardEvent) => {
-      keys.current[e.code] = false;
-    };
-    const blur = () => {
-      keys.current = {};
-    };
-    window.addEventListener("keydown", down);
-    window.addEventListener("keyup", up);
-    window.addEventListener("blur", blur);
-    return () => {
-      window.removeEventListener("keydown", down);
-      window.removeEventListener("keyup", up);
-      window.removeEventListener("blur", blur);
-    };
-  }, []);
+    input.attach(gl.domElement);
+    return () => input.detach();
+  }, [input, gl]);
 
   useFrame((_, rawDt) => {
     const dt = Math.min(rawDt, 0.1);
-    const k = keys.current;
-    const locked = useHud.getState().locked;
-
-    camera.getWorldDirection(forward);
-    forward.y = 0;
-    forward.normalize();
-    right.crossVectors(forward, THREE.Object3D.DEFAULT_UP).normalize();
-
-    let dirX = 0;
-    let dirZ = 0;
-    if (locked) {
-      if (k.KeyW || k.ArrowUp) {
-        dirX += forward.x;
-        dirZ += forward.z;
-      }
-      if (k.KeyS || k.ArrowDown) {
-        dirX -= forward.x;
-        dirZ -= forward.z;
-      }
-      if (k.KeyD || k.ArrowRight) {
-        dirX += right.x;
-        dirZ += right.z;
-      }
-      if (k.KeyA || k.ArrowLeft) {
-        dirX -= right.x;
-        dirZ -= right.z;
-      }
-    }
-    const len = Math.hypot(dirX, dirZ);
-    if (len > 1e-6) {
-      dirX /= len;
-      dirZ /= len;
-    }
+    const frame = input.frame();
+    rig.integrate(frame);
+    const move = rig.moveDir(frame);
 
     engine.update(
       {
-        dirX,
-        dirZ,
-        moving: len > 1e-6,
-        sprint: !!(k.ShiftLeft || k.ShiftRight),
-        jump: locked && !!k.Space,
+        dirX: move.dirX,
+        dirZ: move.dirZ,
+        moving: move.moving,
+        sprint: frame.sprint,
+        jump: frame.jump,
       },
       dt,
     );
-    camera.position.set(engine.playerX, engine.playerY, engine.playerZ);
+
+    engine.avatar.visible = rig.mode === "tp";
+    rig.apply(camera, engine.playerX, engine.playerY, engine.playerZ, engine.cameraClamp, dt);
+    engine.camMode = rig.mode;
+    engine.camPos = { x: camera.position.x, y: camera.position.y, z: camera.position.z };
   });
 
   return <primitive object={engine.group} />;
 }
 
-function LockControls() {
-  const controls = useRef<PointerLockControlsImpl>(null);
-
-  useEffect(() => {
-    const lock = () => controls.current?.lock();
-    window.addEventListener(LOCK_EVENT, lock);
-    return () => window.removeEventListener(LOCK_EVENT, lock);
-  }, []);
-
-  return (
-    // selector matching nothing: without it drei locks on ANY document click,
-    // bypassing the StartOverlay gating. LOCK_EVENT is the only lock path.
-    <PointerLockControls
-      ref={controls}
-      makeDefault
-      selector="#plc-noop"
-      onLock={() => useHud.setState({ locked: true })}
-      onUnlock={() => useHud.setState({ locked: false })}
-    />
-  );
-}
-
 export default function World() {
-  // Lazy ref keeps exactly one engine per mount (strict mode is off).
+  // Lazy refs keep exactly one engine/input/rig per mount (strict mode off).
   const engineRef = useRef<WorldEngine | null>(null);
   engineRef.current ??= new WorldEngine();
   const engine = engineRef.current;
+  const inputRef = useRef<InputManager | null>(null);
+  inputRef.current ??= new InputManager();
+  const rigRef = useRef<CameraRig | null>(null);
+  rigRef.current ??= new CameraRig();
 
   useEffect(() => installTestHook(engine), [engine]);
 
@@ -134,8 +80,7 @@ export default function World() {
       <fog attach="fog" args={[CONFIG.skyColor, CONFIG.fogNear, CONFIG.fogFar]} />
       <hemisphereLight args={["#ffffff", "#8e8678", 1.15]} />
       <directionalLight position={[350, 700, 420]} intensity={1.3} />
-      <Scene engine={engine} />
-      <LockControls />
+      <Scene engine={engine} input={inputRef.current} rig={rigRef.current} />
     </Canvas>
   );
 }

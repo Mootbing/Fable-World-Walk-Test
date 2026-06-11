@@ -143,6 +143,15 @@ export class SimBridge {
     return this.f32(this.sim.entities_ptr(), this.sim.entity_count() * ENTITY_STRIDE);
   }
 
+  /** Same bytes as entityView — for the u32 lanes (id/type/flags). */
+  entityViewU32(): Uint32Array {
+    return new Uint32Array(
+      this.memory.buffer,
+      this.sim.entities_ptr(),
+      this.sim.entity_count() * ENTITY_STRIDE,
+    );
+  }
+
   entityCount(): number {
     return this.sim.entity_count();
   }
