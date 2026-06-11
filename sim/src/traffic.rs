@@ -5,7 +5,7 @@
 //! format, so the instanced pools render them with zero extra work.
 
 use crate::rng::Pcg32;
-use crate::roads::RoadGraph;
+use crate::roads::{sample_polyline, RoadGraph};
 use crate::terrain::HeightGrid;
 use crate::vehicle::{Vehicle, KIND_COUNT};
 
@@ -97,6 +97,7 @@ impl Traffic {
         heights: &HeightGrid,
         player: (f64, f64),
         player_vehicle: Option<&Vehicle>,
+        crossing_peds: &[(f64, f64)],
         rng: &mut Pcg32,
         time: f64,
         dt: f64,
@@ -114,7 +115,7 @@ impl Traffic {
         // Longitudinal control + advance, car by car. O(n^2) leader scan is
         // fine at ambient scale (~40 cars).
         for i in 0..self.cars.len() {
-            let (mut gap, mut leader_speed) = self.leader_gap(graph, i, player_vehicle);
+            let (mut gap, mut leader_speed) = self.leader_gap(graph, i, player_vehicle, crossing_peds);
             // The intersection stop line is a virtual stationary leader.
             if let Some(sg) = stop_gaps[i] {
                 if gap.is_none_or(|g| sg < g) {
@@ -207,7 +208,7 @@ impl Traffic {
             if alive {
                 let car = &mut self.cars[i];
                 let edge = graph.edges[car.edge as usize].as_ref().unwrap();
-                let (px, pz, tx, tz) = sample_edge(&edge.points, car.s);
+                let (px, pz, tx, tz) = sample_polyline(&edge.points, car.s);
                 // Right-hand lane offset.
                 let (rx, rz) = (-tz, tx);
                 car.x = px + rx * LANE_OFFSET;
@@ -344,6 +345,7 @@ impl Traffic {
         graph: &RoadGraph,
         i: usize,
         player_vehicle: Option<&Vehicle>,
+        crossing_peds: &[(f64, f64)],
     ) -> (Option<f64>, f64) {
         let car = &self.cars[i];
         let mut best: Option<(f64, f64)> = None; // (gap, leader speed)
@@ -381,6 +383,24 @@ impl Traffic {
                 let gap = ahead - CAR_LEN;
                 if best.is_none_or(|(g, _)| gap < g) {
                     best = Some((gap, pv.v_long.max(0.0)));
+                }
+            }
+        }
+
+        // Crossing pedestrians in the lane corridor are hard stops.
+        {
+            let car = &self.cars[i];
+            let (fx, fz) = (-(car.yaw.sin()), -(car.yaw.cos()));
+            for (px, pz) in crossing_peds {
+                let dx = px - car.x;
+                let dz = pz - car.z;
+                let ahead = dx * fx + dz * fz;
+                let lateral = (dx * -fz + dz * fx).abs();
+                if ahead > 0.0 && ahead < 18.0 && lateral < 2.2 {
+                    let gap = ahead - 3.0;
+                    if best.is_none_or(|(g, _)| gap < g) {
+                        best = Some((gap, 0.0));
+                    }
                 }
             }
         }
@@ -423,7 +443,7 @@ impl Traffic {
             if rng.next_below(8) >= weight {
                 continue;
             }
-            let mid = sample_edge(&edge.points, edge.len * 0.5);
+            let mid = sample_polyline(&edge.points, edge.len * 0.5);
             let d = ((mid.0 - player.0).powi(2) + (mid.1 - player.1).powi(2)).sqrt();
             if !(SPAWN_NEAR..=SPAWN_FAR).contains(&d) {
                 continue;
@@ -446,7 +466,7 @@ impl Traffic {
                 _ => 4,       // police
             }
             .min(KIND_COUNT - 1);
-            let (px, pz, tx, tz) = sample_edge(&edge.points, s);
+            let (px, pz, tx, tz) = sample_polyline(&edge.points, s);
             let (rx, rz) = (-tz, tx);
             let car = TrafficCar {
                 id: self.next_id,
@@ -567,33 +587,6 @@ fn pick_next_edge(graph: &RoadGraph, edge_id: u32, rng: &mut Pcg32) -> Option<u3
     candidates.last().map(|(id, _)| *id)
 }
 
-/// Point + unit tangent at arc length s along a polyline.
-fn sample_edge(points: &[(f64, f64)], s: f64) -> (f64, f64, f64, f64) {
-    let mut remaining = s.max(0.0);
-    for w in points.windows(2) {
-        let dx = w[1].0 - w[0].0;
-        let dz = w[1].1 - w[0].1;
-        let len = (dx * dx + dz * dz).sqrt();
-        if len < 1e-9 {
-            continue;
-        }
-        if remaining <= len {
-            let t = remaining / len;
-            return (w[0].0 + dx * t, w[0].1 + dz * t, dx / len, dz / len);
-        }
-        remaining -= len;
-    }
-    // Past the end: last point, last tangent.
-    let n = points.len();
-    let (dx, dz) = if n >= 2 {
-        (points[n - 1].0 - points[n - 2].0, points[n - 1].1 - points[n - 2].1)
-    } else {
-        (0.0, -1.0)
-    };
-    let len = (dx * dx + dz * dz).sqrt().max(1e-9);
-    (points[n - 1].0, points[n - 1].1, dx / len, dz / len)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -649,13 +642,13 @@ mod tests {
         t.target = 12;
         let mut rng = Pcg32::new(7);
         for step in 0..600 {
-            t.substep(&g, &hg, (0.0, 0.0), None, &mut rng, step as f64 * DT, DT);
+            t.substep(&g, &hg, (0.0, 0.0), None, &[], &mut rng, step as f64 * DT, DT);
         }
         assert!(t.count() >= 8, "spawned {} of 12", t.count());
 
         // Player teleports far away: everything despawns.
         for step in 0..600 {
-            t.substep(&g, &hg, (10_000.0, 0.0), None, &mut rng, 10.0 + step as f64 * DT, DT);
+            t.substep(&g, &hg, (10_000.0, 0.0), None, &[], &mut rng, 10.0 + step as f64 * DT, DT);
         }
         assert_eq!(t.count(), 0);
     }
@@ -674,7 +667,7 @@ mod tests {
             .position(|e| e.as_ref().is_some_and(|e| e.len > 90.0))
             .unwrap() as u32;
         for (s, speed) in [(40.0, 2.0), (5.0, 9.0)] {
-            let (px, pz, tx, tz) = sample_edge(&g.edges[edge_id as usize].as_ref().unwrap().points, s);
+            let (px, pz, tx, tz) = sample_polyline(&g.edges[edge_id as usize].as_ref().unwrap().points, s);
             t.cars.push(TrafficCar {
                 id: t.next_id,
                 kind: 0,
@@ -701,7 +694,7 @@ mod tests {
         for step in 0..1800 {
             // keep the leader slow
             t.cars[0].speed = t.cars[0].speed.min(2.0);
-            t.substep(&g, &hg, (0.0, 0.0), None, &mut rng, step as f64 * DT, DT);
+            t.substep(&g, &hg, (0.0, 0.0), None, &[], &mut rng, step as f64 * DT, DT);
             if t.cars.len() < 2 {
                 break; // leader exited the edge; chase is over
             }
@@ -720,11 +713,11 @@ mod tests {
         t.target = 10;
         let mut rng = Pcg32::new(99);
         for step in 0..600 {
-            t.substep(&g, &hg, (0.0, 0.0), None, &mut rng, step as f64 * DT, DT);
+            t.substep(&g, &hg, (0.0, 0.0), None, &[], &mut rng, step as f64 * DT, DT);
         }
         let before: Vec<(f64, f64)> = t.cars.iter().map(|c| (c.x, c.z)).collect();
         for step in 0..600 {
-            t.substep(&g, &hg, (0.0, 0.0), None, &mut rng, step as f64 * DT, DT);
+            t.substep(&g, &hg, (0.0, 0.0), None, &[], &mut rng, step as f64 * DT, DT);
         }
         // 10 seconds at >=several m/s: every surviving car moved, none NaN.
         for (i, car) in t.cars.iter().enumerate() {
@@ -737,7 +730,7 @@ mod tests {
     }
 
     fn place_car(t: &mut Traffic, g: &RoadGraph, edge_id: u32, s: f64, speed: f64) -> usize {
-        let (px, pz, tx, tz) = sample_edge(&g.edges[edge_id as usize].as_ref().unwrap().points, s);
+        let (px, pz, tx, tz) = sample_polyline(&g.edges[edge_id as usize].as_ref().unwrap().points, s);
         t.cars.push(TrafficCar {
             id: t.next_id,
             kind: 0,
@@ -811,7 +804,7 @@ mod tests {
         let mut primary_min_speed = f64::INFINITY;
         let mut minor_yielded = false;
         for step in 0..900 {
-            t.substep(&g, &hg, (0.0, 0.0), None, &mut rng, step as f64 * DT, DT);
+            t.substep(&g, &hg, (0.0, 0.0), None, &[], &mut rng, step as f64 * DT, DT);
             for c in &t.cars {
                 if c.id == primary_id {
                     primary_min_speed = primary_min_speed.min(c.speed);
@@ -839,7 +832,7 @@ mod tests {
         let mut last_positions: Vec<(u32, f64, f64)> = Vec::new();
         let mut checks = 0;
         for step in 0..10_000 {
-            t.substep(&g, &hg, (0.0, 0.0), None, &mut rng, step as f64 * DT, DT);
+            t.substep(&g, &hg, (0.0, 0.0), None, &[], &mut rng, step as f64 * DT, DT);
             // Every ~12s of sim time, every surviving car must have moved.
             if step % 720 == 719 {
                 checks += 1;
@@ -898,7 +891,7 @@ mod tests {
         let mut b_through = false;
         for step in 0..3600 {
             // one signal super-cycle is 16s = 960 steps; allow 60s
-            t.substep(&g, &hg, (0.0, 0.0), None, &mut rng, step as f64 * DT, DT);
+            t.substep(&g, &hg, (0.0, 0.0), None, &[], &mut rng, step as f64 * DT, DT);
             for c in &t.cars {
                 if c.id == ida && c.edge != ew {
                     a_through = true;
@@ -918,6 +911,36 @@ mod tests {
     }
 
     #[test]
+    fn traffic_brakes_for_crossing_ped() {
+        let g = grid_graph();
+        let hg = flat();
+        let mut t = Traffic::new();
+        t.target = 0;
+        let mut rng = Pcg32::new(7);
+        let edge_id = g
+            .edges
+            .iter()
+            .position(|e| e.as_ref().is_some_and(|e| e.len > 90.0))
+            .unwrap() as u32;
+        let ci = place_car(&mut t, &g, edge_id, 10.0, 9.0);
+        let car_id = t.cars[ci].id;
+        // A pedestrian crossing the lane 30m ahead of the car.
+        let (px, pz, tx, tz) =
+            sample_polyline(&g.edges[edge_id as usize].as_ref().unwrap().points, 40.0);
+        let ped = (px + -tz * LANE_OFFSET, pz + tx * LANE_OFFSET);
+        let mut min_speed = f64::INFINITY;
+        for step in 0..240 {
+            t.substep(&g, &hg, (0.0, 0.0), None, &[ped], &mut rng, step as f64 * DT, DT);
+            if let Some(c) = t.cars.iter().find(|c| c.id == car_id) {
+                min_speed = min_speed.min(c.speed);
+                let d = ((c.x - ped.0).powi(2) + (c.z - ped.1).powi(2)).sqrt();
+                assert!(d > 1.5, "ran the pedestrian over (d={d:.2})");
+            }
+        }
+        assert!(min_speed < 2.0, "never braked for the ped: {min_speed}");
+    }
+
+    #[test]
     fn traffic_brakes_for_player_vehicle_ahead() {
         let g = grid_graph();
         let hg = flat();
@@ -929,7 +952,7 @@ mod tests {
             .iter()
             .position(|e| e.as_ref().is_some_and(|e| e.len > 90.0))
             .unwrap() as u32;
-        let (px, pz, tx, tz) = sample_edge(&g.edges[edge_id as usize].as_ref().unwrap().points, 10.0);
+        let (px, pz, tx, tz) = sample_polyline(&g.edges[edge_id as usize].as_ref().unwrap().points, 10.0);
         t.cars.push(TrafficCar {
             id: 1,
             kind: 0,
@@ -951,11 +974,11 @@ mod tests {
             braking: false,
         });
         // Park the player's car 25m ahead in the same lane.
-        let (qx, qz, _, _) = sample_edge(&g.edges[edge_id as usize].as_ref().unwrap().points, 35.0);
+        let (qx, qz, _, _) = sample_polyline(&g.edges[edge_id as usize].as_ref().unwrap().points, 35.0);
         let mut pv = Vehicle::new(9, 0, 0, qx + -tz * LANE_OFFSET, qz + tx * LANE_OFFSET, 0.0);
         pv.yaw = t.cars[0].yaw;
         for step in 0..300 {
-            t.substep(&g, &hg, (0.0, 0.0), Some(&pv), &mut rng, step as f64 * DT, DT);
+            t.substep(&g, &hg, (0.0, 0.0), Some(&pv), &[], &mut rng, step as f64 * DT, DT);
         }
         assert!(
             t.cars[0].speed < 1.5,
