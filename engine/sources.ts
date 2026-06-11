@@ -20,6 +20,10 @@ function fill(template: string, z: number, x: number, y: number): string {
 }
 
 export function imagerySource(): TileSource {
+  if (CONFIG.fixtureMode) {
+    // Mirrors the Esri {z}/{y}/{x} path order.
+    return { url: (z, x, y) => `/fixtures/imagery/${z}/${y}/${x}.jpg`, tileSize: 256, maxZoom: 15 };
+  }
   if (CONFIG.imageryTemplate) {
     return { url: (z, x, y) => fill(CONFIG.imageryTemplate, z, x, y), tileSize: 256, maxZoom: 19 };
   }
@@ -42,6 +46,9 @@ export function imagerySource(): TileSource {
 }
 
 export function terrainSource(): TileSource {
+  if (CONFIG.fixtureMode) {
+    return { url: (z, x, y) => `/fixtures/terrain/${z}/${x}/${y}.png`, tileSize: 256, maxZoom: 15 };
+  }
   if (CONFIG.terrainTemplate) {
     return { url: (z, x, y) => fill(CONFIG.terrainTemplate, z, x, y), tileSize: 256, maxZoom: 15 };
   }
@@ -62,6 +69,7 @@ let buildingTemplate: string | null = null;
  * re-resolved with force=true if tiles start 404ing mid-session).
  */
 export async function resolveBuildingTemplate(force = false): Promise<string> {
+  if (CONFIG.fixtureMode) return "/fixtures/buildings/{z}/{x}/{y}.pbf";
   if (buildingTemplate && !force) return buildingTemplate;
   const res = await fetch(OPENFREEMAP_TILEJSON);
   if (!res.ok) throw new Error(`OpenFreeMap TileJSON failed: HTTP ${res.status}`);

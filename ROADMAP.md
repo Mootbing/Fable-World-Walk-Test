@@ -26,11 +26,13 @@ Dev server runs on **port 3001** (3000 belongs to another app on this machine).
   1k-entity readback benchmark logged at boot.
   *Accept:* HUD shows rising `sim #tick`; bench < 0.2 ms/pass; game plays
   exactly as before.
-- [ ] **PR2 `test: offline tile fixtures + Playwright smoke harness + window.__ww test API`** —
-  fixture tiles (terrain/imagery/buildings) for a 5×5 ring around spawn under
-  `public/fixtures/`, `NEXT_PUBLIC_FIXTURE=1` short-circuits `sources.ts`;
-  Playwright `npm run smoke` boots the game offline, `window.__ww`
-  (`query/press/cmd`) drives it; smoke asserts ready + W moves player.
+- [x] **PR2 `test: offline tile fixtures + Playwright smoke harness + window.__ww test API`** —
+  fixture tiles (terrain/imagery/buildings, 3×3 rings, 4.7 MB) around spawn
+  under `public/fixtures/`, `NEXT_PUBLIC_FIXTURE=1` short-circuits
+  `sources.ts` (+ forces radius 1 / imagery z15); Playwright `npm run smoke`
+  boots offline on its own port, `window.__ww` (`ready/query/cmd/press`)
+  drives it; asserts ready, sim ticking, W walks north, world meshed
+  (≥9 meshes, >100k tris), zero page errors, screenshot artifact.
 - [ ] **PR3 `feat: player physics in Rust`** — heightfield upload
   (`load_heightfield`, 256² f32 + origin/size on tile load/unload, pre-init
   queue in bridge), gravity + jump (Space) + fall tracking in `sim/src/player.rs`,

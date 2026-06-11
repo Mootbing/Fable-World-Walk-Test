@@ -3,7 +3,17 @@ function num(v: string | undefined, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
+/**
+ * Fixture mode: boot entirely from tiles committed under public/fixtures/
+ * (captured by scripts/capture-fixtures.mjs) — zero network, deterministic.
+ * Used by the Playwright smoke harness; forces a small world (radius 1,
+ * imagery z15) matching what the capture script downloads.
+ */
+const FIXTURE = process.env.NEXT_PUBLIC_FIXTURE === "1";
+
 export const CONFIG = {
+  fixtureMode: FIXTURE,
+
   spawnLat: num(process.env.NEXT_PUBLIC_SPAWN_LAT, 40.758),
   spawnLon: num(process.env.NEXT_PUBLIC_SPAWN_LON, -73.9855),
 
@@ -13,11 +23,15 @@ export const CONFIG = {
   /** Chunk unit. Fixed: AWS terrarium tiles top out at z15. */
   terrainZoom: 15,
   /** Ground texture zoom; each chunk composites a 2^(iz-15) square of tiles. */
-  imageryZoom: Math.min(19, Math.max(15, num(process.env.NEXT_PUBLIC_IMAGERY_ZOOM, 17))),
+  imageryZoom: FIXTURE
+    ? 15
+    : Math.min(19, Math.max(15, num(process.env.NEXT_PUBLIC_IMAGERY_ZOOM, 17))),
   /** Fixed: OpenFreeMap vector tiles top out at z14. */
   buildingZoom: 14,
 
-  loadRadius: Math.min(4, Math.max(1, num(process.env.NEXT_PUBLIC_LOAD_RADIUS, 2))),
+  loadRadius: FIXTURE
+    ? 1
+    : Math.min(4, Math.max(1, num(process.env.NEXT_PUBLIC_LOAD_RADIUS, 2))),
   fetchConcurrency: Math.min(12, Math.max(2, num(process.env.NEXT_PUBLIC_FETCH_CONCURRENCY, 6))),
 
   mapboxToken: process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? "",
