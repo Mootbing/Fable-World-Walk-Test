@@ -170,8 +170,15 @@ Dev server runs on **port 3001** (3000 belongs to another app on this machine).
   have killed the player at spawn** — first-ever ground contact now snaps
   instead of falling. *Verified:* 55 Rust tests; smoke collects a pickup,
   dies (screenshot), respawns minus the fee.
-- [ ] **PR17 `feat: melee combat + ped panic`** — punch combo, soft lock-on,
-  knockdown/death + money drop, witness flee broadcast.
+- [x] **PR17 `feat: melee combat + ped panic`** — LMB punch (0.45 s
+  cooldown, 1.8 m / 60° arc on the camera yaw), ped HP 30 / 12 per hit;
+  nonlethal hits **knock down** (1.2 s stagger, hittable on the ground —
+  found via test: instant-flee made combos impossible), kills linger as
+  corpses 4 s then despawn + drop $10–50 (often hoovered instantly at
+  arm's length); witnesses scatter; avatar jab animation (aux0 lane);
+  mouse buttons in InputManager (RMB reserved for PR18 aim). Soft lock-on
+  deferred to PR19. *Verified:* 56 Rust tests; smoke kills a ped by
+  mouse-click swings and banks the drop.
 - [ ] **PR18 `feat: ranged combat v1 — pistol`** — weapon slots/ammo, RMB aim
   cam + crosshair, hitscan raycast in Rust (buildings 2.5D + capsules),
   tracer/muzzle/impact FX, reload, pickups.

@@ -51,6 +51,8 @@ export const BTN = {
   enter: 1 << 6,
   /** Horn while driving. */
   horn: 1 << 7,
+  fire: 1 << 8,
+  aim: 1 << 9,
 } as const;
 
 /** Sim event types (mirrors sim/src/events.rs). Records are 4 u32 words. */
@@ -63,5 +65,10 @@ export const EVENT = {
   horn: 6,
   pedHit: 7,
   carjack: 8,
+  playerDied: 9,
+  respawn: 10,
+  pickup: 11,
+  punch: 12,
+  pedKilled: 13,
 } as const;
 export const EVENT_WORDS = 4;

@@ -79,6 +79,7 @@ export class PlayerAvatar {
     const z = entities[LANE.posZ];
     const speed = entities[LANE.speed];
     const phase = entities[LANE.animPhase];
+    const punch = entities[LANE.aux0];
     const grounded = (entitiesU32[LANE.stateFlags] & STATE_FLAG.grounded) !== 0;
 
     this.group.position.set(x, y - 1.7, z);
@@ -90,6 +91,16 @@ export class PlayerAvatar {
     );
     this.group.quaternion.copy(this.quat);
 
+    if (punch > 0) {
+      // Jab: right arm drives forward, slight torso twist.
+      const t = Math.sin(punch * Math.PI);
+      this.rightArm.rotation.x = -1.7 * t;
+      this.leftArm.rotation.x = 0.3 * t;
+      this.leftLeg.rotation.x = 0;
+      this.rightLeg.rotation.x = 0;
+      this.torso.position.y = 0;
+      return;
+    }
     if (!grounded) {
       // Airborne: tuck legs, raise arms slightly.
       this.leftLeg.rotation.x = -0.5;

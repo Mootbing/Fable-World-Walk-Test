@@ -11,6 +11,10 @@ export interface InputFrame {
   enter: boolean;
   /** Horn key held (driving). */
   horn: boolean;
+  /** LMB attack held. */
+  fire: boolean;
+  /** RMB aim held. */
+  aim: boolean;
   /** Mouse deltas already scaled to radians. */
   yawDelta: number;
   pitchDelta: number;
@@ -30,6 +34,7 @@ const SENSITIVITY = 0.0022;
  */
 export class InputManager {
   private keys: Record<string, boolean> = {};
+  private mouse: Record<number, boolean> = {};
   private yawAcc = 0;
   private pitchAcc = 0;
   private toggleEdge = false;
@@ -71,6 +76,15 @@ export class InputManager {
     on(window, "blur", () => {
       this.keys = {};
     });
+    on(window, "mousedown", (e: MouseEvent) => {
+      this.mouse[e.button] = true;
+    });
+    on(window, "mouseup", (e: MouseEvent) => {
+      this.mouse[e.button] = false;
+    });
+    on(window, "contextmenu", (e: MouseEvent) => {
+      if (this.locked()) e.preventDefault();
+    });
     on(window, "mousemove", (e: MouseEvent) => {
       if (!document.pointerLockElement) return;
       this.yawAcc -= e.movementX * SENSITIVITY;
@@ -105,6 +119,8 @@ export class InputManager {
       jump: locked && !!k.Space,
       enter: locked && !!k.KeyE,
       horn: locked && !!k.KeyH,
+      fire: locked && !!this.mouse[0],
+      aim: locked && !!this.mouse[2],
       yawDelta: this.yawAcc,
       pitchDelta: this.pitchAcc,
       toggleCamera: this.toggleEdge,
