@@ -121,7 +121,10 @@ export class VehiclePools {
       );
       this.m.compose(this.pos, this.quat, this.one);
 
-      this.color.setHex(kit.paint ?? PAINT_PALETTE[paintIdx % PAINT_PALETTE.length]);
+      const husk = (u32[base + LANE.stateFlags] & 128) !== 0;
+      this.color.setHex(
+        husk ? 0x141414 : (kit.paint ?? PAINT_PALETTE[paintIdx % PAINT_PALETTE.length]),
+      );
       this.bodies[kind].push(this.m, this.color);
       this.cabins[kind].push(this.m);
 

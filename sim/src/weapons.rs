@@ -121,6 +121,12 @@ impl Weapons {
             self.reload_timer = 0.0;
         } else if !s.melee {
             self.reserve[w] += ammo;
+            // Rack a fresh mag if the gun was sitting empty.
+            if self.clip[w] == 0 && self.reload_timer <= 0.0 {
+                let take = s.clip.min(self.reserve[w]);
+                self.clip[w] += take;
+                self.reserve[w] -= take;
+            }
         }
     }
 

@@ -458,6 +458,39 @@ test("boots from fixtures, sim ticks, player walks", async ({ page }) => {
   expect(pelletFan).toBeGreaterThanOrEqual(shotsBefore + 6); // 8-pellet fan
   await page.evaluate(() => window.__ww!.cmd("equip", 0)); // fists away
 
+  // PR20: shoot a parked car until it detonates (EV_EXPLOSION in the ring).
+  const p20 = (await page.evaluate(() => window.__ww!.query("player"))) as {
+    x: number;
+    z: number;
+  };
+  await page.evaluate(
+    ([x, z]) => window.__ww!.cmd("spawnTraffic", x, z - 11, 0),
+    [p20.x, p20.z] as [number, number],
+  );
+  await page.evaluate(() => window.__ww!.cmd("giveWeapon", 3, 240)); // ammo refill
+  await page.evaluate(() => window.__ww!.cmd("equip", 3)); // …and back in hand
+  let booms = 0;
+  for (let attempt = 0; attempt < 8 && booms === 0; attempt++) {
+    await page.evaluate(() => {
+      window.dispatchEvent(new MouseEvent("mousedown", { button: 2 }));
+      window.dispatchEvent(new MouseEvent("mousedown", { button: 0 }));
+      setTimeout(() => {
+        window.dispatchEvent(new MouseEvent("mouseup", { button: 0 }));
+        window.dispatchEvent(new MouseEvent("mouseup", { button: 2 }));
+      }, 1500);
+    });
+    await page.waitForTimeout(2000);
+    booms = (await page.evaluate(() => {
+      const log = window.__ww!.query("eventLog") as number[];
+      let c = 0;
+      for (let i = 0; i < log.length; i += 4) if (log[i] === 17) c++;
+      return c;
+    })) as number;
+  }
+  expect(booms).toBeGreaterThanOrEqual(1);
+  await page.screenshot({ path: "test-results/explosion.png" });
+  await page.evaluate(() => window.__ww!.cmd("equip", 0));
+
   // World actually meshed: 9 terrain chunks alone are ~295k triangles, and
   // Times Square building tiles add meshes on top.
   const render = (await page.evaluate(() => window.__ww!.query("render"))) as {

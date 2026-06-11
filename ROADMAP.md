@@ -199,8 +199,16 @@ Dev server runs on **port 3001** (3000 belongs to another app on this machine).
   give_weapon/equip_weapon wasm surface. *Verified:* 60 Rust tests (SMG
   cadence, cycle skips unowned); smoke drains an SMG clip on one hold +
   counts an 8-pellet shotgun fan.
-- [ ] **PR20 `feat: vehicle damage, fire, explosions`** — collision+bullet HP,
-  smoke→fire→explosion staging, 8 m radius damage + chain reactions, husks.
+- [x] **PR20 `feat: vehicle damage, fire, explosions`** — vehicle/traffic
+  HP (bullets via routed hitscan targets, wall crashes, player↔traffic
+  rams damage both); staging by HP: ≤50 smoking, ≤25 burning (drains
+  4/s), 0 → detonation: 8 m radius kills peds, falloff-damages the
+  player, deals 80 to neighbor vehicles (→ burning → **chain reactions**
+  across substeps); husks tint charcoal, traffic husks despawn after
+  12 s; dying in your own car = 150 damage + ejection; fire/smoke/blast
+  particle pools (one Points draw) + flags lanes. *Verified:* 61 Rust
+  tests (SMG → boom chains to the neighbor, bystander dies, distant
+  player safe); smoke detonates a car in-browser via held SMG fire.
 - [ ] **PR21 `feat: wanted system v1 — stars 1–3, pursuit, busted`** — crime
   heat, cop spawns (foot→armed→cars w/ siren + A* pursuit), busted/evasion
   state machine, police-station respawn.

@@ -76,6 +76,9 @@ pub struct Vehicle {
     pub steer: f64,
     /// Accumulated wheel rotation (radians) for the renderer.
     pub wheel_spin: f64,
+    pub hp: f64,
+    /// Burnt-out shell: no driving, no further damage, black tint.
+    pub husk: bool,
     smooth_ground: Option<f64>,
 }
 
@@ -103,6 +106,8 @@ impl Vehicle {
             v_lat: 0.0,
             steer: 0.0,
             wheel_spin: 0.0,
+            hp: 100.0,
+            husk: false,
             smooth_ground: None,
         }
     }
@@ -215,6 +220,8 @@ impl Vehicle {
             let impact = speed_before - self.speed();
             if impact > CRASH_SPEED {
                 events.push(EV_CRASH, (impact as f32).to_bits(), self.id, 0);
+                // Bodywork pays for the wall.
+                self.hp = (self.hp - (impact - 2.0).max(0.0) * 2.2).max(0.0);
             }
         }
 

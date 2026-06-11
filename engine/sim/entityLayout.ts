@@ -41,6 +41,9 @@ export const STATE_FLAG = {
   braking: 4,
   fleeing: 8,
   down: 16,
+  smoking: 32,
+  burning: 64,
+  husk: 128,
 } as const;
 
 /** Input button bitfield (mirrors sim/src/input.rs). */
@@ -75,5 +78,6 @@ export const EVENT = {
   gunshot: 14,
   reload: 15,
   dryfire: 16,
+  explosion: 17,
 } as const;
 export const EVENT_WORDS = 4;
