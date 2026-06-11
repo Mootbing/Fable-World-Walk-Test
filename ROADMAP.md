@@ -191,8 +191,14 @@ Dev server runs on **port 3001** (3000 belongs to another app on this machine).
   presses vanish at late-run fps), eager ped spawner. *Verified:* 58
   Rust tests (fire/reload cycle, 2-tap kill, wall blocks the shot to the
   ped behind it); smoke fires real aim+click events, clip drains.
-- [ ] **PR19 `feat: weapon wheel + arsenal (bat, SMG, shotgun)`** — hold-Tab
-  radial wheel, spread/recoil/pellets per weapon.
+- [x] **PR19 `feat: weapon wheel + arsenal (bat, SMG, shotgun)`** —
+  weapons.rs rebuilt spec-driven (damage/cooldown/clip/reload/range/
+  pellets/spread/auto per weapon): bat 25 dmg melee 2.3 m, SMG full-auto
+  ~11/s, shotgun 8-pellet cone; hold-Tab radial wheel + Digit1-5 equip +
+  Q cycles owned; per-slot ammo, generic ammo feeds the equipped gun;
+  give_weapon/equip_weapon wasm surface. *Verified:* 60 Rust tests (SMG
+  cadence, cycle skips unowned); smoke drains an SMG clip on one hold +
+  counts an 8-pellet shotgun fan.
 - [ ] **PR20 `feat: vehicle damage, fire, explosions`** — collision+bullet HP,
   smoke→fire→explosion staging, 8 m radius damage + chain reactions, husks.
 - [ ] **PR21 `feat: wanted system v1 — stars 1–3, pursuit, busted`** — crime
