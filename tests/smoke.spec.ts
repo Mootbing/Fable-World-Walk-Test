@@ -152,6 +152,27 @@ test("boots from fixtures, sim ticks, player walks", async ({ page }) => {
   expect(fleet.meshes - meshesBefore).toBeLessThanOrEqual(2);
   await page.screenshot({ path: "test-results/fleet.png" });
 
+  // PR8: the real OSM road graph — midtown Manhattan's z14 tile must yield
+  // a dense, well-connected directed graph in the wasm sim.
+  const roads = (await page.evaluate(() => window.__ww!.query("roads"))) as {
+    edges: number;
+    nodes: number;
+    connectivity: number;
+  };
+  expect(roads.edges).toBeGreaterThan(150);
+  expect(roads.nodes).toBeGreaterThan(50);
+  expect(roads.connectivity).toBeGreaterThan(0.85);
+  await page.evaluate(() => window.__ww!.cmd("roadDebug"));
+  await page.waitForTimeout(500);
+  const overlay = (await page.evaluate(() => window.__ww!.query("roadDebugInfo"))) as {
+    visible: boolean;
+    vertices: number;
+  };
+  expect(overlay.visible).toBe(true);
+  expect(overlay.vertices).toBeGreaterThan(1000);
+  await page.screenshot({ path: "test-results/road-graph.png" });
+  await page.evaluate(() => window.__ww!.cmd("roadDebug"));
+
   // World actually meshed: 9 terrain chunks alone are ~295k triangles, and
   // Times Square building tiles add meshes on top.
   const render = (await page.evaluate(() => window.__ww!.query("render"))) as {

@@ -7,6 +7,7 @@ pub mod events;
 pub mod input;
 pub mod player;
 pub mod rng;
+pub mod roads;
 pub mod terrain;
 pub mod vehicle;
 
@@ -57,6 +58,7 @@ pub struct Sim {
     driving: Option<usize>,
     next_vehicle_id: u32,
     rng: rng::Pcg32,
+    roads: roads::RoadGraph,
     events: Events,
     /// Preallocated at MAX_ENTITIES so the pointer never moves (no wasm
     /// memory growth from the entity buffer itself).
@@ -84,6 +86,7 @@ impl Sim {
             driving: None,
             next_vehicle_id: 1,
             rng: rng::Pcg32::new(rng::derive_seed(seed, "world", 0, 0)),
+            roads: roads::RoadGraph::new(),
             events: Events::new(),
             entities: vec![0.0; MAX_ENTITIES * ENTITY_STRIDE],
             entity_count: 1, // entity 0 is always the player
@@ -149,6 +152,54 @@ impl Sim {
 
     pub fn unload_tile_buildings(&mut self, tx: i32, ty: i32) {
         self.collision.remove_tile((tx, ty));
+    }
+
+    /// Road polylines for one z14 tile (see engine/roads.ts for the flat
+    /// format). Builds/extends the directed road graph.
+    pub fn load_tile_roads(
+        &mut self,
+        tx: i32,
+        ty: i32,
+        coords: &[f32],
+        line_offsets: &[u32],
+        line_attrs: &[u32],
+    ) {
+        let mut lines = Vec::with_capacity(line_attrs.len());
+        for li in 0..line_attrs.len() {
+            let v0 = line_offsets[li] as usize;
+            let v1 = line_offsets[li + 1] as usize;
+            let pts: Vec<(f64, f64)> = (v0..v1)
+                .map(|v| (coords[v * 2] as f64, coords[v * 2 + 1] as f64))
+                .collect();
+            lines.push((pts, roads::unpack_attr(line_attrs[li])));
+        }
+        self.roads.load_tile((tx, ty), &lines);
+    }
+
+    pub fn unload_tile_roads(&mut self, tx: i32, ty: i32) {
+        self.roads.unload_tile((tx, ty));
+    }
+
+    pub fn road_edge_count(&self) -> u32 {
+        self.roads.edge_count()
+    }
+
+    pub fn road_node_count(&self) -> u32 {
+        self.roads.node_count()
+    }
+
+    pub fn road_connectivity(&self) -> f64 {
+        self.roads.connectivity()
+    }
+
+    /// Component edge-length totals, sorted descending (debug).
+    pub fn road_components(&self) -> Vec<f64> {
+        self.roads.component_lengths()
+    }
+
+    /// Debug overlay: flat [x0,z0,x1,z1,...] segment soup of all edges.
+    pub fn debug_road_graph(&self) -> Vec<f32> {
+        self.roads.debug_segments()
     }
 
     /// Debug/test probe: resolve a circle against the collision world and

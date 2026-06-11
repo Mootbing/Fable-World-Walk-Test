@@ -11,6 +11,8 @@ import { BTN } from "./sim/entityLayout";
 import { PlayerAvatar } from "./render/playerAvatar";
 import { VehiclePools } from "./render/vehiclePools";
 import { KITS } from "./render/vehicleKits";
+import { RoadDebugOverlay } from "./render/roadDebugOverlay";
+import { extractRoadTile, RoadTile } from "./roads";
 import type { CameraClamp } from "./render/cameraRig";
 import { useHud } from "./store";
 
@@ -24,6 +26,7 @@ export interface MoveInput {
   /** Raw -1..1 axes for vehicles (throttle / steering). */
   forward: number;
   strafe: number;
+  toggleRoadDebug: boolean;
 }
 
 const DIFF_INTERVAL = 0.25;
@@ -59,6 +62,9 @@ export class WorldEngine {
   /** Visible player body (third person only). */
   readonly avatar = new PlayerAvatar();
   readonly vehiclePools = new VehiclePools();
+  readonly roadDebug = new RoadDebugOverlay();
+  /** Per-tile road polylines (minimap + sim upload share this). */
+  readonly roadTiles = new Map<string, RoadTile>();
   /** Renderer-reported camera state, for HUD/tests. */
   camMode: "fp" | "tp" = "fp";
   camPos = { x: 0, y: 0, z: 0 };
@@ -74,6 +80,7 @@ export class WorldEngine {
   /** Tile data that arrived before the wasm module finished booting. */
   private pendingTiles = new Map<string, PendingTile>();
   private pendingBuildings = new Map<string, { tx: number; ty: number; flat: FlatFootprints }>();
+  private pendingRoads = new Map<string, { tx: number; ty: number; roads: RoadTile }>();
   private playerCache = { x: 0, y: 40, z: 0 };
 
   private diffTimer = DIFF_INTERVAL; // run the first diff immediately
@@ -131,6 +138,28 @@ export class WorldEngine {
       }
     };
 
+    // Roads ride in the same MVT bytes: extract, keep for the minimap,
+    // and feed the sim's directed graph.
+    this.buildings.onTileData = (tx, ty, buf) => {
+      const roads = extractRoadTile(buf, tx, ty, CONFIG.buildingZoom, this.anchor);
+      if (!roads) return;
+      this.roadTiles.set(`${tx}/${ty}`, roads);
+      if (this.sim) {
+        this.sim.loadTileRoads(tx, ty, roads.coords, roads.lineOffsets, roads.lineAttrs);
+      } else {
+        this.pendingRoads.set(`${tx}/${ty}`, { tx, ty, roads });
+      }
+    };
+    this.buildings.onTileDataRemoved = (tx, ty) => {
+      if (!this.roadTiles.delete(`${tx}/${ty}`)) return;
+      if (this.sim) {
+        this.sim.unloadTileRoads(tx, ty);
+      } else {
+        this.pendingRoads.delete(`${tx}/${ty}`);
+      }
+    };
+
+    this.group.add(this.roadDebug.group);
     void this.bootSim();
   }
 
@@ -161,6 +190,10 @@ export class WorldEngine {
         sim.loadTileBuildings(b.tx, b.ty, b.flat);
       }
       this.pendingBuildings.clear();
+      for (const r of this.pendingRoads.values()) {
+        sim.loadTileRoads(r.tx, r.ty, r.roads.coords, r.roads.lineOffsets, r.roads.lineAttrs);
+      }
+      this.pendingRoads.clear();
       const avgMs = sim.benchmark(1000);
       console.info(
         `[sim] v${SimBridge.version} booted · 1k-entity readback ${avgMs.toFixed(3)} ms/pass`,
@@ -194,6 +227,13 @@ export class WorldEngine {
         : null;
       this.avatar.update(this.sim.entityView(), this.sim.entityViewU32(), this.elapsed);
       this.vehiclePools.update(this.sim.entityView(), this.sim.entityViewU32());
+
+      if (input.toggleRoadDebug) this.roadDebug.toggle();
+      this.roadDebug.update(
+        dt,
+        () => this.sim!.debugRoadGraph(),
+        (x, z) => this.heights.sample(x, z),
+      );
 
       const events = this.sim.drainEvents();
       if (events.length > 0) {
@@ -287,6 +327,7 @@ export class WorldEngine {
     this.buildings.disposeAll();
     this.avatar.dispose();
     this.vehiclePools.dispose();
+    this.roadDebug.dispose();
     this.sim?.dispose();
     this.sim = null;
   }

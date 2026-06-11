@@ -78,13 +78,20 @@ Dev server runs on **port 3001** (3000 belongs to another app on this machine).
   `spawnRow` debug cmd; HUD shows vehicle name. *Verified:* 27 Rust tests
   (class envelopes ordered van<sedan<sport), smoke spawns 24-car fleet with
   ≤2 new scene meshes + screenshot.
-- [ ] **PR8 `feat: road graph extraction from MVT transportation layer`** —
-  parse `transportation` from the already-fetched z14 MVTs in JS
-  (`engine/roads.ts`, clip to tile bounds), upload polylines+attrs; Rust graph
-  build: 0.5 m quantized node merge gated on `brunnel`/`layer`, border
-  stitching, directed lane edges (RHT offsets), class speeds; F3 debug
-  overlay (LineSegments). *Accept:* overlay hugs real streets; fixture tests
-  (Manhattan/London/LA) ≥90 % connectivity.
+- [x] **PR8 `feat: road graph extraction from MVT transportation layer`** —
+  `engine/roads.ts` parses `transportation` from the already-fetched z14
+  MVTs (affine tile→world, Liang-Barsky clip to exact tile bounds, flat
+  upload); Rust `roads.rs` builds the directed graph incrementally: 0.5 m
+  quantized node merge (interiors fuse only same `brunnel`/`layer` level;
+  endpoints by position so bridges connect), cross-tile stitching falls out
+  of clip+quantize, oneway → single directed edge, class speeds; G-key /
+  cmd debug overlay (LineSegments draped on terrain); connectivity metric
+  is **edge-length weighted** (real tiles have many genuinely-isolated
+  service fragments — midtown probe: 113 components, main grid 78.6 km vs
+  0.6 km runner-up). *Verified:* 7 graph unit tests (4-way, overpass
+  isolation, bridge continuity, T-junction order-independence, stitch,
+  unload/reload, oneway); smoke on real midtown: 1126 edges, 0.895
+  connectivity, overlay 3542 verts.
 - [ ] **PR9 `feat: ambient traffic v1`** — spawn annulus 150–400 m (seeded
   per tile), lane following, IDM car-following, despawn rules incl. tile
   unload (player vehicle pinned). *Accept:* 20–40 cars driving on the right,
