@@ -11,6 +11,12 @@ pub const EV_VEHICLE_ENTER: u32 = 3;
 pub const EV_VEHICLE_EXIT: u32 = 4;
 /// a = impact speed (f32 bits), b = vehicle id.
 pub const EV_CRASH: u32 = 5;
+/// a = vehicle id.
+pub const EV_HORN: u32 = 6;
+/// a = impact speed (f32 bits).
+pub const EV_PED_HIT: u32 = 7;
+/// a = new vehicle id.
+pub const EV_CARJACK: u32 = 8;
 
 pub const EVENT_WORDS: usize = 4;
 const MAX_EVENTS: usize = 256;

@@ -117,6 +117,10 @@ export function installTestHook(engine: WorldEngine): () => void {
         case "roadDebug":
           engine.roadDebug.toggle();
           return engine.roadDebug.visible;
+        case "spawnTraffic": {
+          const [x, z, kind] = args as [number, number, number];
+          return engine.sim ? engine.sim.debugSpawnTraffic(x, z, 0, kind ?? 0) : 0;
+        }
         // Debug: spawn a grid of vehicles cycling through all kinds.
         case "spawnRow": {
           const [n] = args as [number];

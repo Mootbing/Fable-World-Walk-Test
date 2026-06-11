@@ -14,7 +14,7 @@ pub mod traffic;
 pub mod vehicle;
 
 use collision::{CollisionWorld, Footprint};
-use events::{Events, EV_VEHICLE_ENTER, EV_VEHICLE_EXIT};
+use events::{Events, EV_CARJACK, EV_HORN, EV_PED_HIT, EV_VEHICLE_ENTER, EV_VEHICLE_EXIT};
 use input::Input;
 use player::Player;
 use terrain::HeightGrid;
@@ -34,6 +34,8 @@ pub const TYPE_VEHICLE: u32 = 2;
 pub const FLAG_GROUNDED: u32 = 1;
 pub const FLAG_IN_VEHICLE: u32 = 2;
 pub const FLAG_BRAKING: u32 = 4;
+pub const FLAG_FLEEING: u32 = 8;
+pub const FLAG_DOWN: u32 = 16;
 
 /// How close the player must be to a vehicle to enter it (m).
 const ENTER_RANGE: f64 = 3.0;
@@ -294,10 +296,25 @@ impl Sim {
         self.driving.map_or(0.0, |i| self.vehicles[i].yaw)
     }
 
-    /// Distance to the nearest enterable vehicle, or -1 (for the HUD toast).
+    /// Distance to the nearest enterable vehicle (owned or traffic), or -1.
     pub fn nearest_vehicle_dist(&self) -> f64 {
-        self.nearest_vehicle()
-            .map_or(-1.0, |(_, d2)| d2.sqrt())
+        let owned = self.nearest_vehicle().map(|(_, d2)| d2);
+        let jacked = self
+            .traffic
+            .nearest_car(self.player.x, self.player.z)
+            .map(|(_, d2)| d2);
+        match (owned, jacked) {
+            (Some(a), Some(b)) => a.min(b).sqrt(),
+            (Some(a), None) => a.sqrt(),
+            (None, Some(b)) => b.sqrt(),
+            (None, None) => -1.0,
+        }
+    }
+
+    /// Spawn a parked traffic car at an exact spot (debug/tests/setups).
+    pub fn debug_spawn_traffic(&mut self, x: f64, z: f64, yaw: f64, kind: u32) -> u32 {
+        let paint = self.rng.next_below(8);
+        self.traffic.debug_spawn_at(x, z, yaw, kind, paint)
     }
 
     // ---- per-frame ----
@@ -464,8 +481,25 @@ impl Sim {
             &self.collision,
             (self.player.x, self.player.z),
             &mut self.rng,
+            self.time,
             SUBSTEP,
         );
+
+        // Horn scatters the sidewalk; bull-bar contact knocks peds down.
+        if let Some(vi) = self.driving {
+            if self.input.pressed(input::BTN_HORN) {
+                let v = &self.vehicles[vi];
+                self.events.push(EV_HORN, v.id, 0, 0);
+                self.peds.scatter((v.x, v.z), 14.0, self.time + 4.0);
+            }
+            let (vx, vz, vyaw, hl, vspeed) = {
+                let v = &self.vehicles[vi];
+                (v.x, v.z, v.yaw, vehicle::spec(v.kind).half_length, v.v_long)
+            };
+            for (_, _, impact) in self.peds.vehicle_hits(vx, vz, vyaw, hl, vspeed, self.time) {
+                self.events.push(EV_PED_HIT, (impact as f32).to_bits(), 0, 0);
+            }
+        }
 
         self.input.tick();
 
@@ -539,14 +573,46 @@ impl Sim {
     }
 
     fn try_enter_vehicle(&mut self) {
-        let Some((i, d2)) = self.nearest_vehicle() else {
-            return;
-        };
-        if d2.sqrt() > ENTER_RANGE {
-            return;
+        let owned = self.nearest_vehicle();
+        let jacked = self.traffic.nearest_car(self.player.x, self.player.z);
+        let range2 = ENTER_RANGE * ENTER_RANGE;
+        let owned_ok = owned.filter(|(_, d2)| *d2 <= range2);
+        let traffic_ok = jacked.filter(|(_, d2)| *d2 <= range2);
+
+        match (owned_ok, traffic_ok) {
+            (Some((i, od2)), Some((_, td2))) if od2 <= td2 => self.enter_owned(i),
+            (Some((i, _)), None) => self.enter_owned(i),
+            (_, Some((ti, _))) => self.carjack(ti),
+            (None, None) => {}
         }
+    }
+
+    fn enter_owned(&mut self, i: usize) {
         self.driving = Some(i);
         self.events.push(EV_VEHICLE_ENTER, self.vehicles[i].id, 0, 0);
+    }
+
+    /// Yank the driver out of a traffic car and take it. The car converts
+    /// into an owned vehicle; the driver bails out the far door and flees.
+    fn carjack(&mut self, ti: usize) {
+        let car = self.traffic.take_car(ti);
+        let (fx, fz) = (-(car.yaw.sin()), -(car.yaw.cos()));
+        let (rx, rz) = (-fz, fx);
+        self.peds.spawn_fleeing(
+            car.x + rx * 1.9,
+            car.z + rz * 1.9,
+            (car.x, car.z),
+            self.time + 6.0,
+            &mut self.rng,
+        );
+        let id = self.next_vehicle_id;
+        self.next_vehicle_id += 1;
+        let mut v = Vehicle::new(id, car.kind, car.paint, car.x, car.z, car.yaw);
+        v.v_long = car.speed * 0.3;
+        self.vehicles.push(v);
+        self.driving = Some(self.vehicles.len() - 1);
+        self.events.push(EV_CARJACK, id, 0, 0);
+        self.events.push(EV_VEHICLE_ENTER, id, 0, 0);
     }
 
     fn exit_vehicle(&mut self, i: usize) {
@@ -679,7 +745,12 @@ impl Sim {
             e[11] = 1.0;
             e[12] = f32::from_bits(p.id);
             e[13] = f32::from_bits(TYPE_PED << 16 | p.variant);
-            e[14] = f32::from_bits(FLAG_GROUNDED);
+            let pf = match p.state {
+                peds::PedState::Fleeing { .. } => FLAG_GROUNDED | FLAG_FLEEING,
+                peds::PedState::Down { .. } => FLAG_DOWN,
+                peds::PedState::Walking => FLAG_GROUNDED,
+            };
+            e[14] = f32::from_bits(pf);
         }
 
         self.entity_count = (1 + self.vehicles.len() + self.traffic.cars.len()
@@ -830,6 +901,72 @@ mod tests {
             .map(|i| unsafe { *sim.events_ptr().add(i) })
             .collect();
         assert!(evs.chunks(4).any(|e| e[0] == EV_VEHICLE_EXIT));
+    }
+
+    #[test]
+    fn carjack_horn_and_knockdown() {
+        let mut sim = Sim::new(1, 0.0, 0.0);
+        sim.load_heightfield(0, 0, -500.0, -500.0, 1000.0, &vec![0.0; FIELD_SIZE * FIELD_SIZE]);
+        sim.set_player_enabled(true);
+        // A parked taxi with a driver, 3m east of the player.
+        sim.debug_spawn_traffic(2.5, 0.0, 0.0, 3);
+        for _ in 0..30 {
+            sim.step(SUBSTEP);
+        }
+        assert_eq!(sim.traffic_count(), 1);
+
+        // E: carjack it (closer than the starter car at +10).
+        sim.set_input(input::BTN_ENTER, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+        sim.step(SUBSTEP);
+        assert!(sim.driving(), "carjack should enter the taxi");
+        assert_eq!(sim.driving_kind(), 3);
+        assert_eq!(sim.traffic_count(), 0, "traffic car consumed");
+        assert_eq!(sim.ped_count(), 1, "driver bailed out fleeing");
+        let evs: Vec<u32> = (0..sim.events_count() as usize * 4)
+            .map(|k| unsafe { *sim.events_ptr().add(k) })
+            .collect();
+        assert!(evs.chunks(4).any(|e| e[0] == events::EV_CARJACK));
+
+        // Horn: the fleeing driver is already fleeing; spawn check via event.
+        sim.set_input(input::BTN_HORN, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+        sim.step(SUBSTEP);
+        let evs: Vec<u32> = (0..sim.events_count() as usize * 4)
+            .map(|k| unsafe { *sim.events_ptr().add(k) })
+            .collect();
+        assert!(evs.chunks(4).any(|e| e[0] == events::EV_HORN));
+    }
+
+    #[test]
+    fn driving_into_a_ped_knocks_them_down() {
+        let mut sim = Sim::new(1, 0.0, 0.0);
+        sim.load_heightfield(0, 0, -500.0, -500.0, 1000.0, &vec![0.0; FIELD_SIZE * FIELD_SIZE]);
+        sim.set_player_enabled(true);
+        // Enter the starter car (at +10,0; walk there via warp).
+        sim.set_player_pos(9.0, 0.0);
+        sim.set_input(input::BTN_ENTER, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+        sim.step(SUBSTEP);
+        assert!(sim.driving());
+        // A pedestrian standing in the road 25m north of the car.
+        sim.peds
+            .spawn_fleeing(10.0, -25.0, (10.0, -26.0), 1e9, &mut rng::Pcg32::new(1));
+        // Make them hold still: overwrite as Walking far from rails won't
+        // work (no rail) — leave fleeing slowly away; drive north into them.
+        sim.set_input(0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0);
+        let mut hit = false;
+        for _ in 0..600 {
+            sim.step(SUBSTEP);
+            let n = sim.events_count() as usize;
+            for e in 0..n {
+                if unsafe { *sim.events_ptr().add(e * 4) } == events::EV_PED_HIT {
+                    hit = true;
+                }
+            }
+            if hit {
+                break;
+            }
+        }
+        assert!(hit, "never hit the ped");
+        assert_eq!(sim.peds.down_count(), 1, "ped should be knocked down");
     }
 
     #[test]

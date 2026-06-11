@@ -109,6 +109,12 @@ export class PedPools {
         f32[base + LANE.quatZ],
         f32[base + LANE.quatW],
       );
+      const down = (u32[base + LANE.stateFlags] & 16) !== 0;
+      if (down) {
+        // Knocked flat: tip the whole body back around the feet.
+        this.limbQuat.setFromAxisAngle(this.xAxis, -1.45);
+        this.quat.multiply(this.limbQuat);
+      }
       this.root.compose(this.pos, this.quat, this.one);
 
       this.color.setHex(SHIRT_PALETTE[variant % SHIRT_PALETTE.length]);
@@ -118,7 +124,7 @@ export class PedPools {
       const speed = f32[base + LANE.speed];
       const phase = f32[base + LANE.animPhase];
       const amp = 0.45 + 0.4 * Math.min(1, speed / 2.5);
-      const swing = speed > 0.05 ? Math.sin(phase * Math.PI * 2) * amp : 0;
+      const swing = !down && speed > 0.05 ? Math.sin(phase * Math.PI * 2) * amp : 0;
 
       this.pushLimb(this.arm, 0.28, shoulder, -swing * 0.7, this.color);
       this.pushLimb(this.arm, -0.28, shoulder, swing * 0.7, this.color);

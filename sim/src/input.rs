@@ -6,6 +6,8 @@ pub const BTN_SPRINT: u32 = 1 << 4;
 pub const BTN_JUMP: u32 = 1 << 5;
 /// Enter/exit the nearest vehicle (edge-triggered).
 pub const BTN_ENTER: u32 = 1 << 6;
+/// Horn while driving (edge-triggered).
+pub const BTN_HORN: u32 = 1 << 7;
 
 #[derive(Default)]
 pub struct Input {

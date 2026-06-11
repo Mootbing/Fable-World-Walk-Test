@@ -83,6 +83,50 @@ impl Traffic {
         self.cars.len() as u32
     }
 
+    /// Nearest car to a point: (index, squared distance).
+    pub fn nearest_car(&self, x: f64, z: f64) -> Option<(usize, f64)> {
+        let mut best: Option<(usize, f64)> = None;
+        for (i, c) in self.cars.iter().enumerate() {
+            let d2 = (c.x - x).powi(2) + (c.z - z).powi(2);
+            if best.is_none_or(|(_, b)| d2 < b) {
+                best = Some((i, d2));
+            }
+        }
+        best
+    }
+
+    /// Remove and return a car (carjacking converts it to an owned vehicle).
+    pub fn take_car(&mut self, index: usize) -> TrafficCar {
+        self.cars.swap_remove(index)
+    }
+
+    /// Spawn a parked car off the graph at an exact spot (tests, setups).
+    pub fn debug_spawn_at(&mut self, x: f64, z: f64, yaw: f64, kind: u32, paint: u32) -> u32 {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.cars.push(TrafficCar {
+            id,
+            kind,
+            paint,
+            edge: u32::MAX,
+            s: 0.0,
+            speed: 0.0,
+            x,
+            y: 0.0,
+            z,
+            yaw,
+            steer: 0.0,
+            wheel_spin: 0.0,
+            next_edge: None,
+            smooth_ground: None,
+            prev_yaw: yaw,
+            stopped_since: None,
+            creeping: false,
+            braking: false,
+        });
+        id
+    }
+
     /// Drop cars whose edges were just removed (tile unload).
     pub fn despawn_edges(&mut self, removed: &[u32]) {
         let set: std::collections::HashSet<u32> = removed.iter().copied().collect();
@@ -173,7 +217,11 @@ impl Traffic {
         let mut i = 0;
         while i < self.cars.len() {
             let mut alive = true;
+            let off_grid = self.cars[i].edge == u32::MAX;
             loop {
+                if off_grid {
+                    break; // parked off-graph (debug spawns); no rail logic
+                }
                 let car = &self.cars[i];
                 let Some(edge) = graph.edges.get(car.edge as usize).and_then(|e| e.as_ref())
                 else {
@@ -205,7 +253,18 @@ impl Traffic {
                 }
             }
 
-            if alive {
+            if alive && off_grid {
+                let car = &mut self.cars[i];
+                car.speed = 0.0;
+                if let Some(g) = heights.sample(car.x, car.z) {
+                    car.y = g;
+                }
+                let dx = car.x - player.0;
+                let dz = car.z - player.1;
+                if (dx * dx + dz * dz).sqrt() > DESPAWN_BEYOND {
+                    alive = false;
+                }
+            } else if alive {
                 let car = &mut self.cars[i];
                 let edge = graph.edges[car.edge as usize].as_ref().unwrap();
                 let (px, pz, tx, tz) = sample_polyline(&edge.points, car.s);
@@ -349,8 +408,10 @@ impl Traffic {
     ) -> (Option<f64>, f64) {
         let car = &self.cars[i];
         let mut best: Option<(f64, f64)> = None; // (gap, leader speed)
-        let edge_len = graph.edges[car.edge as usize]
-            .as_ref()
+        let edge_len = graph
+            .edges
+            .get(car.edge as usize)
+            .and_then(|e| e.as_ref())
             .map(|e| e.len)
             .unwrap_or(0.0);
 
