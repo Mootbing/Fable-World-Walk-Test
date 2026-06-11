@@ -97,6 +97,7 @@ export class WorldEngine {
   gpsRoute: Float32Array | null = null;
   waypoint: { x: number; z: number } | null = null;
   private gpsTimer = 0;
+  private fxTimer = 0;
   /** Per-frame driving snapshot for the chase cam + HUD. */
   driveState: { yaw: number; speed: number } | null = null;
 
@@ -283,6 +284,12 @@ export class WorldEngine {
       const events = this.sim.drainEvents();
       if (events.length > 0) {
         for (let i = 0; i < events.length; i += 4) {
+          if (events[i] === 17) {
+            const f32 = new Float32Array(
+              new Uint32Array([events[i + 1], events[i + 2], events[i + 3]]).buffer,
+            );
+            this.fx.explosion(f32[0], f32[1], f32[2]);
+          }
           // Gunshots draw a tracer from the muzzle to the hit point.
           if (events[i] === 14) {
             const f32 = new Float32Array(
@@ -301,6 +308,18 @@ export class WorldEngine {
         for (const word of events) this.eventLog.push(word);
         const excess = this.eventLog.length - EVENT_LOG_CAP * 4;
         if (excess > 0) this.eventLog.splice(0, excess);
+      }
+      // Burning/smoking vehicles emit at a steady trickle.
+      this.fxTimer += dt;
+      if (this.fxTimer >= 0.12) {
+        this.fxTimer = 0;
+        const f32 = this.sim.entityView();
+        const u32 = this.sim.entityViewU32();
+        for (let base = 0; base < f32.length; base += 16) {
+          const flags = u32[base + 14];
+          if (flags & 64) this.fx.flame(f32[base], f32[base + 1], f32[base + 2]);
+          else if (flags & 32) this.fx.smokePuff(f32[base], f32[base + 1], f32[base + 2]);
+        }
       }
       this.fx.update(dt);
     }

@@ -56,6 +56,10 @@ pub struct TrafficCar {
     /// Deadlock breaker engaged: ignore the line, crawl through.
     creeping: bool,
     pub braking: bool,
+    pub hp: f64,
+    pub husk: bool,
+    /// Sim time when a husk should despawn.
+    pub husk_until: f64,
 }
 
 pub struct Traffic {
@@ -123,6 +127,9 @@ impl Traffic {
             stopped_since: None,
             creeping: false,
             braking: false,
+            hp: 100.0,
+            husk: false,
+            husk_until: 0.0,
         });
         id
     }
@@ -159,6 +166,10 @@ impl Traffic {
         // Longitudinal control + advance, car by car. O(n^2) leader scan is
         // fine at ambient scale (~40 cars).
         for i in 0..self.cars.len() {
+            if self.cars[i].husk {
+                self.cars[i].speed = 0.0;
+                continue;
+            }
             let (mut gap, mut leader_speed) = self.leader_gap(graph, i, player_vehicle, crossing_peds);
             // The intersection stop line is a virtual stationary leader.
             if let Some(sg) = stop_gaps[i] {
@@ -217,7 +228,11 @@ impl Traffic {
         let mut i = 0;
         while i < self.cars.len() {
             let mut alive = true;
-            let off_grid = self.cars[i].edge == u32::MAX;
+            if self.cars[i].husk && time >= self.cars[i].husk_until {
+                self.cars.swap_remove(i);
+                continue;
+            }
+            let off_grid = self.cars[i].edge == u32::MAX || self.cars[i].husk;
             loop {
                 if off_grid {
                     break; // parked off-graph (debug spawns); no rail logic
@@ -548,6 +563,9 @@ impl Traffic {
                 stopped_since: None,
                 creeping: false,
                 braking: false,
+                hp: 100.0,
+                husk: false,
+                husk_until: 0.0,
             };
             self.next_id += 1;
             self.cars.push(car);
@@ -748,6 +766,9 @@ mod tests {
                 stopped_since: None,
                 creeping: false,
                 braking: false,
+                hp: 100.0,
+                husk: false,
+                husk_until: 0.0,
             });
             t.next_id += 1;
         }
@@ -811,6 +832,9 @@ mod tests {
             stopped_since: None,
             creeping: false,
             braking: false,
+            hp: 100.0,
+            husk: false,
+            husk_until: 0.0,
         });
         t.next_id += 1;
         t.cars.len() - 1
@@ -1033,6 +1057,9 @@ mod tests {
             stopped_since: None,
             creeping: false,
             braking: false,
+            hp: 100.0,
+            husk: false,
+            husk_until: 0.0,
         });
         // Park the player's car 25m ahead in the same lane.
         let (qx, qz, _, _) = sample_polyline(&g.edges[edge_id as usize].as_ref().unwrap().points, 35.0);

@@ -28,6 +28,8 @@ pub const EV_PED_KILLED: u32 = 13;
 pub const EV_GUNSHOT: u32 = 14;
 pub const EV_RELOAD: u32 = 15;
 pub const EV_DRYFIRE: u32 = 16;
+/// a/b/c = x/y/z of the blast (f32 bits).
+pub const EV_EXPLOSION: u32 = 17;
 
 pub const EVENT_WORDS: usize = 4;
 const MAX_EVENTS: usize = 256;

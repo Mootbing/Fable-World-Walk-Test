@@ -17,7 +17,7 @@ pub mod weapons;
 pub mod vehicle;
 
 use collision::{CollisionWorld, Footprint};
-use events::{Events, EV_CARJACK, EV_DRYFIRE, EV_GUNSHOT, EV_HORN, EV_PED_HIT, EV_PED_KILLED, EV_PUNCH, EV_RELOAD, EV_VEHICLE_ENTER, EV_VEHICLE_EXIT};
+use events::{Events, EV_CARJACK, EV_DRYFIRE, EV_EXPLOSION, EV_GUNSHOT, EV_HORN, EV_PED_HIT, EV_PED_KILLED, EV_PUNCH, EV_RELOAD, EV_VEHICLE_ENTER, EV_VEHICLE_EXIT};
 use input::Input;
 use player::Player;
 use terrain::HeightGrid;
@@ -40,6 +40,9 @@ pub const FLAG_IN_VEHICLE: u32 = 2;
 pub const FLAG_BRAKING: u32 = 4;
 pub const FLAG_FLEEING: u32 = 8;
 pub const FLAG_DOWN: u32 = 16;
+pub const FLAG_SMOKING: u32 = 32;
+pub const FLAG_BURNING: u32 = 64;
+pub const FLAG_HUSK: u32 = 128;
 
 /// How close the player must be to a vehicle to enter it (m).
 const ENTER_RANGE: f64 = 3.0;
@@ -636,6 +639,8 @@ impl Sim {
             }
         }
 
+        self.update_vehicle_damage();
+
         self.pickups.collect(
             self.player.x,
             self.player.z,
@@ -749,18 +754,112 @@ impl Sim {
             }
         }
         if hit {
-            let v = &mut self.vehicles[vi];
-            let speed_before = v.speed();
-            v.x += push.0;
-            v.z += push.1;
-            v.v_long *= 0.45;
-            v.v_lat *= 0.45;
-            let impact = speed_before - v.speed();
+            let (impact, vx, vz) = {
+                let v = &mut self.vehicles[vi];
+                let speed_before = v.speed();
+                v.x += push.0;
+                v.z += push.1;
+                v.v_long *= 0.45;
+                v.v_lat *= 0.45;
+                let impact = speed_before - v.speed();
+                if impact > 3.0 {
+                    self.events
+                        .push(events::EV_CRASH, (impact as f32).to_bits(), v.id, 0);
+                    v.hp = (v.hp - (impact - 2.0).max(0.0) * 2.5).max(0.0);
+                }
+                (impact, v.x, v.z)
+            };
             if impact > 3.0 {
-                self.events
-                    .push(events::EV_CRASH, (impact as f32).to_bits(), v.id, 0);
+                // The rammed car takes it too.
+                if let Some((ci, d2)) = self.traffic.nearest_car(vx, vz) {
+                    if d2 < 9.0 && !self.traffic.cars[ci].husk {
+                        let c = &mut self.traffic.cars[ci];
+                        c.hp = (c.hp - (impact - 2.0).max(0.0) * 2.5).max(0.0);
+                    }
+                }
             }
         }
+    }
+
+    /// Fire/explosion staging: burning vehicles drain, dead ones detonate
+    /// with 8m radius damage — chains propagate across substeps.
+    fn update_vehicle_damage(&mut self) {
+        let mut blasts: Vec<(f64, f64, f64)> = Vec::new();
+        for i in 0..self.vehicles.len() {
+            let v = &mut self.vehicles[i];
+            if v.husk {
+                continue;
+            }
+            if v.hp <= 25.0 {
+                v.hp -= 4.0 * SUBSTEP; // burning
+            }
+            if v.hp <= 0.0 {
+                v.husk = true;
+                blasts.push((v.x, v.y, v.z));
+                if self.driving == Some(i) {
+                    // Went up with the car.
+                    self.stats.damage(150.0, &mut self.events);
+                    self.driving = None;
+                }
+            }
+        }
+        for c in &mut self.traffic.cars {
+            if c.husk {
+                continue;
+            }
+            if c.hp <= 25.0 {
+                c.hp -= 4.0 * SUBSTEP;
+            }
+            if c.hp <= 0.0 {
+                c.husk = true;
+                c.husk_until = self.time + 12.0;
+                blasts.push((c.x, c.y, c.z));
+            }
+        }
+        for (x, y, z) in blasts {
+            self.explode_at(x, y, z);
+        }
+    }
+
+    fn explode_at(&mut self, x: f64, y: f64, z: f64) {
+        const RADIUS: f64 = 8.0;
+        self.events.push(
+            EV_EXPLOSION,
+            (x as f32).to_bits(),
+            (y as f32).to_bits(),
+            (z as f32).to_bits(),
+        );
+        // Pedestrians in the blast die.
+        for i in 0..self.peds.peds.len() {
+            let (px, pz) = (self.peds.peds[i].x, self.peds.peds[i].z);
+            let d = ((px - x).powi(2) + (pz - z).powi(2)).sqrt();
+            if d < RADIUS && !self.peds.peds[i].dead {
+                if self.peds.apply_damage(i, 200.0, (x, z), self.time) {
+                    self.events.push(EV_PED_KILLED, 0, 0, 0);
+                }
+            }
+        }
+        // Player takes falloff damage.
+        let pd = ((self.player.x - x).powi(2) + (self.player.z - z).powi(2)).sqrt();
+        if pd < RADIUS {
+            self.stats
+                .damage(70.0 * (1.0 - pd / RADIUS) + 15.0, &mut self.events);
+        }
+        // Neighboring vehicles cook off: 80 leaves them burning (<25hp),
+        // so chains actually propagate after a delay.
+        for v in &mut self.vehicles {
+            let d = ((v.x - x).powi(2) + (v.z - z).powi(2)).sqrt();
+            if d < RADIUS && !v.husk && d > 0.01 {
+                v.hp = (v.hp - 80.0).max(0.0);
+            }
+        }
+        for c in &mut self.traffic.cars {
+            let d = ((c.x - x).powi(2) + (c.z - z).powi(2)).sqrt();
+            if d < RADIUS && !c.husk && d > 0.01 {
+                c.hp = (c.hp - 80.0).max(0.0);
+            }
+        }
+        self.peds.scatter((x, z), 30.0, self.time + 6.0);
     }
 
     /// Hitscan along the camera yaw: nearest of building wall, ped, or
@@ -780,6 +879,8 @@ impl Sim {
             let mut best_t = max;
             let mut kind = 0u32;
             let mut ped_idx: Option<usize> = None;
+            let mut veh_idx: Option<usize> = None;
+            let mut car_idx: Option<usize> = None;
             if let Some(t) = self.collision.raycast(ox, oz, ox + dx * max, oz + dz * max) {
                 best_t = t * max;
                 kind = 1;
@@ -791,27 +892,43 @@ impl Sim {
                     ped_idx = Some(i);
                 }
             }
-            for v in &self.vehicles {
+            for (i, v) in self.vehicles.iter().enumerate() {
                 if let Some(t) = ray_circle(ox, oz, dx, dz, v.x, v.z, 1.1, max) {
                     if t < best_t {
                         best_t = t;
                         kind = 3;
                         ped_idx = None;
+                        veh_idx = Some(i);
+                        car_idx = None;
                     }
                 }
             }
-            for c in &self.traffic.cars {
+            for (i, c) in self.traffic.cars.iter().enumerate() {
                 if let Some(t) = ray_circle(ox, oz, dx, dz, c.x, c.z, 1.1, max) {
                     if t < best_t {
                         best_t = t;
                         kind = 3;
                         ped_idx = None;
+                        veh_idx = None;
+                        car_idx = Some(i);
                     }
                 }
             }
 
             let hx = ox + dx * best_t;
             let hz = oz + dz * best_t;
+            if let Some(i) = veh_idx {
+                let v = &mut self.vehicles[i];
+                if !v.husk {
+                    v.hp = (v.hp - s.damage).max(0.0);
+                }
+            }
+            if let Some(i) = car_idx {
+                let c = &mut self.traffic.cars[i];
+                if !c.husk {
+                    c.hp = (c.hp - s.damage).max(0.0);
+                }
+            }
             if let Some(i) = ped_idx {
                 if self.peds.apply_damage(i, s.damage, (ox, oz), self.time) {
                     self.events.push(EV_PED_KILLED, 0, 0, 0);
@@ -972,7 +1089,15 @@ impl Sim {
             e[11] = 1.0;
             e[12] = f32::from_bits(v.id);
             e[13] = f32::from_bits(TYPE_VEHICLE << 16 | v.kind << 8 | v.paint);
-            e[14] = f32::from_bits(if Some(slot) == driving { FLAG_IN_VEHICLE } else { 0 });
+            let mut vf = if Some(slot) == driving { FLAG_IN_VEHICLE } else { 0 };
+            if v.husk {
+                vf |= FLAG_HUSK;
+            } else if v.hp <= 25.0 {
+                vf |= FLAG_BURNING;
+            } else if v.hp <= 50.0 {
+                vf |= FLAG_SMOKING;
+            }
+            e[14] = f32::from_bits(vf);
         }
 
         // then ambient traffic (same record shape; pools render them all)
@@ -997,7 +1122,15 @@ impl Sim {
             e[11] = 1.0;
             e[12] = f32::from_bits(c.id);
             e[13] = f32::from_bits(TYPE_VEHICLE << 16 | c.kind << 8 | c.paint);
-            e[14] = f32::from_bits(if c.braking { FLAG_BRAKING } else { 0 });
+            let mut cf = if c.braking { FLAG_BRAKING } else { 0 };
+            if c.husk {
+                cf |= FLAG_HUSK;
+            } else if c.hp <= 25.0 {
+                cf |= FLAG_BURNING;
+            } else if c.hp <= 50.0 {
+                cf |= FLAG_SMOKING;
+            }
+            e[14] = f32::from_bits(cf);
         }
 
         // then pedestrians
@@ -1245,6 +1378,48 @@ mod tests {
         assert!((sim.player_x()).abs() < 1e-6 && (sim.player_z()).abs() < 1e-6);
         assert_eq!(sim.player_money() as i64, money_before as i64 - 100);
         assert!((sim.player_health() - 100.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn shooting_a_car_explodes_and_chains() {
+        let mut sim = Sim::new(1, 0.0, 0.0);
+        sim.load_heightfield(0, 0, -500.0, -500.0, 1000.0, &vec![0.0; FIELD_SIZE * FIELD_SIZE]);
+        sim.set_player_enabled(true);
+        sim.give_weapon(weapons::WEAPON_SMG, 240);
+        // Two parked cars side by side, a bystander next to them, player 20m south.
+        sim.debug_spawn_traffic(0.0, -20.0, 0.0, 0);
+        sim.debug_spawn_traffic(3.2, -20.0, 0.0, 0);
+        sim.debug_spawn_ped(-3.0, -20.0);
+        for _ in 0..30 {
+            sim.step(SUBSTEP);
+        }
+
+        // Hold the trigger north until the first blast, then let it cook.
+        let mut explosions = 0;
+        for tick in 0..1800 {
+            let buttons = if explosions == 0 {
+                input::BTN_AIM | input::BTN_FIRE
+            } else {
+                0
+            };
+            sim.set_input(buttons, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+            sim.step(SUBSTEP);
+            for e in 0..sim.events_count() as usize {
+                if unsafe { *sim.events_ptr().add(e * 4) } == events::EV_EXPLOSION {
+                    explosions += 1;
+                }
+            }
+            if explosions >= 2 {
+                break;
+            }
+            let _ = tick;
+        }
+        assert!(explosions >= 2, "chain never propagated ({explosions} blasts)");
+        // Both cars are husks; the bystander died in the blast.
+        assert!(sim.traffic.cars.iter().all(|c| c.husk));
+        assert!(sim.peds.peds.iter().all(|p| p.dead || p.id >= 2_000_002));
+        // Player at 20m was outside the radius.
+        assert!(!sim.player_dead());
     }
 
     #[test]
