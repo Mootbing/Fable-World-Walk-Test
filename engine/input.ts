@@ -52,6 +52,18 @@ export class InputManager {
       this.keys[e.code] = true;
       if (e.code === "KeyV" && !e.repeat && this.locked()) this.toggleEdge = true;
       if (e.code === "KeyG" && !e.repeat && this.locked()) this.roadDebugEdge = true;
+      if (e.code === "KeyM" && !e.repeat) {
+        // Map toggle: opening releases pointer lock so the cursor can
+        // click; closing re-locks (keydown carries user activation).
+        const hud = useHud.getState();
+        if (hud.mapOpen) {
+          useHud.setState({ mapOpen: false });
+          this.element?.requestPointerLock();
+        } else if (hud.locked) {
+          useHud.setState({ mapOpen: true });
+          document.exitPointerLock();
+        }
+      }
     });
     on(window, "keyup", (e: KeyboardEvent) => {
       this.keys[e.code] = false;

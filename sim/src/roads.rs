@@ -330,6 +330,203 @@ impl RoadGraph {
     }
 }
 
+impl RoadGraph {
+    /// Nearest live edge to a point: (edge id, arc length of the closest
+    /// point). Linear scan — called at routing cadence, not per frame.
+    pub fn nearest_edge_point(&self, x: f64, z: f64) -> Option<(u32, f64)> {
+        self.nearest_edge_candidates(x, z).into_iter().next()
+    }
+
+    /// Up to 4 nearby (edge, s) snap candidates — both directed twins of
+    /// the closest street make A* direction-agnostic at the endpoints.
+    fn nearest_edge_candidates(&self, x: f64, z: f64) -> Vec<(u32, f64)> {
+        let mut all: Vec<(u32, f64, f64)> = Vec::new(); // (edge, s, d2)
+        for (id, edge) in self.edges.iter().enumerate() {
+            let Some(edge) = edge.as_ref() else { continue };
+            let mut acc = 0.0;
+            let mut best: Option<(f64, f64)> = None; // (s, d2) for this edge
+            for w in edge.points.windows(2) {
+                let (ax, az) = w[0];
+                let (bx, bz) = w[1];
+                let abx = bx - ax;
+                let abz = bz - az;
+                let len2 = abx * abx + abz * abz;
+                if len2 < 1e-12 {
+                    continue;
+                }
+                let len = len2.sqrt();
+                let t = (((x - ax) * abx + (z - az) * abz) / len2).clamp(0.0, 1.0);
+                let cx = ax + abx * t;
+                let cz = az + abz * t;
+                let d2 = (x - cx) * (x - cx) + (z - cz) * (z - cz);
+                if best.is_none_or(|(_, b)| d2 < b) {
+                    best = Some((acc + t * len, d2));
+                }
+                acc += len;
+            }
+            if let Some((s, d2)) = best {
+                all.push((id as u32, s, d2));
+            }
+        }
+        all.sort_by(|a, b| a.2.total_cmp(&b.2));
+        let Some(best_d2) = all.first().map(|c| c.2) else {
+            return Vec::new();
+        };
+        let cutoff = (best_d2.sqrt() + 8.0).powi(2);
+        all.into_iter()
+            .take(4)
+            .filter(|c| c.2 <= cutoff)
+            .map(|(id, s, _)| (id, s))
+            .collect()
+    }
+
+    /// Shortest drivable route between two world points (multi-seed A*
+    /// over directed edges, distance cost). Returns the route polyline.
+    pub fn route(&self, sx: f64, sz: f64, gx: f64, gz: f64) -> Option<Vec<(f64, f64)>> {
+        use std::cmp::Reverse;
+        use std::collections::BinaryHeap;
+        use std::collections::HashMap;
+
+        let starts = self.nearest_edge_candidates(sx, sz);
+        let goals = self.nearest_edge_candidates(gx, gz);
+        if starts.is_empty() || goals.is_empty() {
+            return None;
+        }
+
+        // Direct same-edge slice when start precedes goal on one edge.
+        let mut direct: Option<(f64, Vec<(f64, f64)>)> = None;
+        for (se, ss) in &starts {
+            for (ge, gs) in &goals {
+                if se == ge && gs >= ss {
+                    let pts = &self.edges[*se as usize].as_ref()?.points;
+                    let slice = slice_polyline(pts, *ss, *gs);
+                    let len = gs - ss;
+                    if direct.as_ref().is_none_or(|(l, _)| len < *l) {
+                        direct = Some((len, slice));
+                    }
+                }
+            }
+        }
+
+        #[derive(PartialEq)]
+        struct K(f64);
+        impl Eq for K {}
+        impl PartialOrd for K {
+            fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+                Some(self.cmp(other))
+            }
+        }
+        impl Ord for K {
+            fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+                self.0.total_cmp(&other.0)
+            }
+        }
+
+        // Goal set: reaching goal_edge.from completes via a goal-edge slice.
+        let mut goal_map: HashMap<u32, (u32, f64)> = HashMap::new();
+        for (ge, gs) in &goals {
+            let edge = self.edges[*ge as usize].as_ref()?;
+            let entry = goal_map.entry(edge.from).or_insert((*ge, *gs));
+            if *gs < entry.1 {
+                *entry = (*ge, *gs);
+            }
+        }
+        let goal_pt = (gx, gz);
+        let h = |n: u32| {
+            let node = &self.nodes[n as usize];
+            ((node.x - goal_pt.0).powi(2) + (node.z - goal_pt.1).powi(2)).sqrt()
+        };
+
+        let mut dist: HashMap<u32, f64> = HashMap::new();
+        let mut prev: HashMap<u32, u32> = HashMap::new();
+        let mut seed_edge: HashMap<u32, (u32, f64)> = HashMap::new();
+        let mut heap: BinaryHeap<(Reverse<K>, u32)> = BinaryHeap::new();
+
+        for (se, ss) in &starts {
+            let edge = self.edges[*se as usize].as_ref()?;
+            let cost = edge.len - ss;
+            if dist.get(&edge.to).is_none_or(|c| cost < *c) {
+                dist.insert(edge.to, cost);
+                seed_edge.insert(edge.to, (*se, *ss));
+                heap.push((Reverse(K(cost + h(edge.to))), edge.to));
+            }
+        }
+
+        let mut found: Option<(f64, u32)> = None; // (total cost, goal node)
+        while let Some((Reverse(K(f)), node)) = heap.pop() {
+            if let Some((ge, gs)) = goal_map.get(&node) {
+                let total = dist[&node] + gs;
+                if direct.as_ref().is_none_or(|(l, _)| total < *l) {
+                    found = Some((total, node));
+                }
+                let _ = ge;
+                break;
+            }
+            if f > dist.get(&node).copied().unwrap_or(f64::INFINITY) + h(node) + 1e-6 {
+                continue;
+            }
+            let d = dist[&node];
+            for out_edge in &self.nodes[node as usize].out {
+                let Some(edge) = self.edges.get(*out_edge as usize).and_then(|e| e.as_ref())
+                else {
+                    continue;
+                };
+                let nd = d + edge.len;
+                if dist.get(&edge.to).is_none_or(|cur| nd < *cur) {
+                    dist.insert(edge.to, nd);
+                    prev.insert(edge.to, *out_edge);
+                    heap.push((Reverse(K(nd + h(edge.to))), edge.to));
+                }
+            }
+        }
+
+        match found {
+            None => direct.map(|(_, slice)| slice),
+            Some((_, goal_node)) => {
+                let (ge, gs) = goal_map[&goal_node];
+                let goal_edge = self.edges[ge as usize].as_ref()?;
+                // Walk back to a seeded node.
+                let mut chain: Vec<u32> = Vec::new();
+                let mut cur = goal_node;
+                while let Some(eid) = prev.get(&cur) {
+                    chain.push(*eid);
+                    cur = self.edges[*eid as usize].as_ref()?.from;
+                }
+                chain.reverse();
+                let (se, ss) = seed_edge[&cur];
+                let start_edge = self.edges[se as usize].as_ref()?;
+
+                let mut out = slice_polyline(&start_edge.points, ss, start_edge.len);
+                for eid in chain {
+                    let e = self.edges[eid as usize].as_ref()?;
+                    out.extend(e.points.iter().skip(1));
+                }
+                out.extend(slice_polyline(&goal_edge.points, 0.0, gs).into_iter().skip(1));
+                Some(out)
+            }
+        }
+    }
+}
+
+/// Sub-polyline between two arc lengths (s_from <= s_to).
+pub fn slice_polyline(points: &[(f64, f64)], s_from: f64, s_to: f64) -> Vec<(f64, f64)> {
+    let mut out = Vec::new();
+    let start = sample_polyline(points, s_from);
+    out.push((start.0, start.1));
+    let mut acc = 0.0;
+    for w in points.windows(2) {
+        let len = ((w[1].0 - w[0].0).powi(2) + (w[1].1 - w[0].1).powi(2)).sqrt();
+        let seg_end = acc + len;
+        if seg_end > s_from && seg_end < s_to {
+            out.push(w[1]);
+        }
+        acc = seg_end;
+    }
+    let end = sample_polyline(points, s_to.min(acc));
+    out.push((end.0, end.1));
+    out
+}
+
 /// Point + unit tangent at arc length s along a polyline (clamped to ends).
 pub fn sample_polyline(points: &[(f64, f64)], s: f64) -> (f64, f64, f64, f64) {
     let mut remaining = s.max(0.0);
@@ -457,6 +654,54 @@ mod tests {
         g.load_tile((1, 0), &[(vec![(0.0, 10.0), (80.0, 10.0)], attr(3))]);
         assert_eq!(g.node_count(), 3);
         assert!((g.connectivity() - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn route_follows_the_grid() {
+        let mut g = RoadGraph::new();
+        // L-shaped network: EW street and NS street meeting at the origin.
+        g.load_tile(
+            (0, 0),
+            &[
+                (vec![(-300.0, 0.0), (0.0, 0.0), (300.0, 0.0)], attr(3)),
+                (vec![(0.0, -300.0), (0.0, 0.0), (0.0, 300.0)], attr(3)),
+            ],
+        );
+        let route = g.route(-250.0, 5.0, 5.0, -250.0).expect("route exists");
+        let len: f64 = route
+            .windows(2)
+            .map(|w| ((w[1].0 - w[0].0).powi(2) + (w[1].1 - w[0].1).powi(2)).sqrt())
+            .sum();
+        // ~250m west-arm + ~250m north-arm, plus snap slack.
+        assert!((len - 500.0).abs() < 40.0, "route length {len}");
+        // Route passes near the corner.
+        assert!(
+            route.iter().any(|p| p.0.abs() < 5.0 && p.1.abs() < 5.0),
+            "route misses the intersection"
+        );
+    }
+
+    #[test]
+    fn route_respects_oneway() {
+        let mut g = RoadGraph::new();
+        let mut ow = attr(3);
+        ow.oneway = 1; // only A→B
+        g.load_tile((0, 0), &[(vec![(0.0, 0.0), (200.0, 0.0)], ow)]);
+        // With the flow: fine. Against the flow on an isolated oneway: none.
+        assert!(g.route(10.0, 0.0, 190.0, 0.0).is_some());
+        assert!(g.route(190.0, 0.0, 10.0, 0.0).is_none());
+    }
+
+    #[test]
+    fn same_edge_route_is_a_slice() {
+        let mut g = RoadGraph::new();
+        g.load_tile((0, 0), &[(vec![(0.0, 0.0), (200.0, 0.0)], attr(3))]);
+        let route = g.route(20.0, 1.0, 150.0, -1.0).unwrap();
+        let len: f64 = route
+            .windows(2)
+            .map(|w| ((w[1].0 - w[0].0).powi(2) + (w[1].1 - w[0].1).powi(2)).sqrt())
+            .sum();
+        assert!((len - 130.0).abs() < 5.0, "slice length {len}");
     }
 
     #[test]

@@ -42,6 +42,11 @@ export function installTestHook(engine: WorldEngine): () => void {
           return engine.avatar.visible;
         case "driving":
           return engine.sim ? engine.sim.driving() : false;
+        case "gps":
+          return {
+            waypoint: engine.waypoint ? { ...engine.waypoint } : null,
+            routePoints: engine.gpsRoute ? engine.gpsRoute.length / 2 : 0,
+          };
         case "roads":
           return engine.sim ? engine.sim.roadStats() : null;
         case "traffic":
@@ -114,6 +119,14 @@ export function installTestHook(engine: WorldEngine): () => void {
           engine.sim?.setPlayerPos(x, z);
           return true;
         }
+        case "setWaypoint": {
+          const [x, z] = args as [number, number];
+          engine.setWaypoint(x, z);
+          return engine.gpsRoute ? engine.gpsRoute.length / 2 : 0;
+        }
+        case "clearWaypoint":
+          engine.clearWaypoint();
+          return true;
         case "roadDebug":
           engine.roadDebug.toggle();
           return engine.roadDebug.visible;

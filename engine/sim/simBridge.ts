@@ -110,6 +110,11 @@ export class SimBridge {
     return this.sim.debug_road_graph();
   }
 
+  /** Route polyline from the player to (x,z); empty when unreachable. */
+  routeTo(x: number, z: number): Float32Array {
+    return this.sim.route_to(x, z);
+  }
+
   /** Debug/test: circle pushed out of the wasm collision world. */
   resolveProbe(x: number, z: number, r: number): { x: number; z: number } {
     const out = this.sim.resolve_probe(x, z, r);

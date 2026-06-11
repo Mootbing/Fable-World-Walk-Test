@@ -142,8 +142,15 @@ Dev server runs on **port 3001** (3000 belongs to another app on this machine).
   for future systems, N rim marker; `engineRef` module handle for
   DOM-side components; HUD stats moved top-left. *Verified:* smoke counts
   >800 street-stroke pixels on the painted radar.
-- [ ] **PR14 `feat: full map + waypoint + GPS routing`** — M pannable map,
-  click waypoint, A* in Rust over road graph, magenta GPS polyline, reroute.
+- [x] **PR14 `feat: full map + waypoint + GPS routing`** — multi-seed A*
+  in Rust (both directed twins seeded at start AND goal — single-snap
+  routing backtracked 100 m; oneway-respecting, same-edge slice
+  shortcut); M toggles a pannable/zoomable full map (click = waypoint,
+  pointer lock handed off both ways), magenta route on radar + map,
+  engine GPS state (2 s arrival check <18 m, deviation >35 m → reroute).
+  *Verified:* 50 Rust tests (grid route ≈500 m through the corner,
+  oneway refusal, same-edge slice), smoke routes 250 m north on real
+  streets + counts magenta radar pixels + M round-trip.
 - [ ] **PR15 `feat: area-name toasts + clock HUD`** — `place` layer →
   neighborhood fade-toasts; game clock on HUD.
 

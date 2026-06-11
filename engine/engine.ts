@@ -74,6 +74,10 @@ export class WorldEngine {
   camYaw = 0;
   /** Generic minimap blips (mission markers, waypoints — future systems). */
   readonly blips: { id: string; x: number; z: number; color: string }[] = [];
+  /** Active GPS route polyline (flat world [x,z,...]), or null. */
+  gpsRoute: Float32Array | null = null;
+  waypoint: { x: number; z: number } | null = null;
+  private gpsTimer = 0;
   /** Per-frame driving snapshot for the chase cam + HUD. */
   driveState: { yaw: number; speed: number } | null = null;
 
@@ -259,6 +263,7 @@ export class WorldEngine {
       this.buildings.update(this.playerX, this.playerZ);
     }
     this.buildings.processBuildQueue();
+    this.updateGps(dt);
 
     if (!this.ready && this.sim) {
       const groundLoaded = this.heights.sample(this.playerX, this.playerZ) !== null;
@@ -329,6 +334,54 @@ export class WorldEngine {
     },
     sampleGround: (x, z) => this.heights.sample(x, z),
   };
+
+  /** Set the GPS waypoint: magenta blip + routed line on radar and map. */
+  setWaypoint(x: number, z: number): void {
+    this.waypoint = { x, z };
+    const idx = this.blips.findIndex((b) => b.id === "waypoint");
+    const blip = { id: "waypoint", x, z, color: "#d24bd2" };
+    if (idx >= 0) this.blips[idx] = blip;
+    else this.blips.push(blip);
+    this.recomputeRoute();
+  }
+
+  clearWaypoint(): void {
+    this.waypoint = null;
+    this.gpsRoute = null;
+    const idx = this.blips.findIndex((b) => b.id === "waypoint");
+    if (idx >= 0) this.blips.splice(idx, 1);
+  }
+
+  private recomputeRoute(): void {
+    if (!this.sim || !this.waypoint) return;
+    const route = this.sim.routeTo(this.waypoint.x, this.waypoint.z);
+    this.gpsRoute = route.length >= 4 ? route : null;
+  }
+
+  /** Arrival + deviation checks at a gentle cadence. */
+  private updateGps(dt: number): void {
+    if (!this.waypoint) return;
+    this.gpsTimer += dt;
+    if (this.gpsTimer < 2) return;
+    this.gpsTimer = 0;
+    const dx = this.playerX - this.waypoint.x;
+    const dz = this.playerZ - this.waypoint.z;
+    if (Math.hypot(dx, dz) < 18) {
+      this.clearWaypoint();
+      return;
+    }
+    if (this.gpsRoute) {
+      // Deviated >35m from the routed line? Re-route.
+      let best = Infinity;
+      for (let i = 0; i < this.gpsRoute.length; i += 8) {
+        const d = Math.hypot(this.playerX - this.gpsRoute[i], this.playerZ - this.gpsRoute[i + 1]);
+        if (d < best) best = d;
+      }
+      if (best > 35) this.recomputeRoute();
+    } else {
+      this.recomputeRoute(); // graph may have streamed in since
+    }
+  }
 
   dispose(): void {
     this.disposed = true;

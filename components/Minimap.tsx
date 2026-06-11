@@ -108,6 +108,18 @@ export default function Minimap() {
         }
       }
 
+      // GPS route.
+      if (engine.gpsRoute) {
+        ctx.strokeStyle = "#d24bd2";
+        ctx.lineWidth = 4.5 / scale;
+        ctx.beginPath();
+        ctx.moveTo(engine.gpsRoute[0], engine.gpsRoute[1]);
+        for (let i = 2; i < engine.gpsRoute.length; i += 2) {
+          ctx.lineTo(engine.gpsRoute[i], engine.gpsRoute[i + 1]);
+        }
+        ctx.stroke();
+      }
+
       // Future mission/system blips.
       for (const blip of engine.blips) {
         ctx.fillStyle = blip.color;
