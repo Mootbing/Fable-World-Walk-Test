@@ -78,10 +78,11 @@ function Scene({ engine }: { engine: WorldEngine }) {
         dirZ,
         moving: len > 1e-6,
         sprint: !!(k.ShiftLeft || k.ShiftRight),
+        jump: locked && !!k.Space,
       },
       dt,
     );
-    camera.position.set(engine.player.x, engine.player.y, engine.player.z);
+    camera.position.set(engine.playerX, engine.playerY, engine.playerZ);
   });
 
   return <primitive object={engine.group} />;

@@ -28,9 +28,12 @@ export function installTestHook(engine: WorldEngine): () => void {
         case "ready":
           return useHud.getState().ready;
         case "player":
-          return { x: engine.player.x, y: engine.player.y, z: engine.player.z };
+          return { x: engine.playerX, y: engine.playerY, z: engine.playerZ };
         case "simTick":
           return engine.sim ? engine.sim.tick : 0;
+        case "eventLog":
+          // flat 4-word records [type, a, b, c], newest last
+          return [...engine.eventLog];
         case "hud":
           return useHud.getState();
         case "render": {

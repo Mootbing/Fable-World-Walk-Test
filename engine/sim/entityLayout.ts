@@ -32,3 +32,20 @@ export const ENTITY_TYPE = {
   police: 3,
   policePed: 4,
 } as const;
+
+export const STATE_FLAG = {
+  grounded: 1,
+} as const;
+
+/** Input button bitfield (mirrors sim/src/input.rs). */
+export const BTN = {
+  sprint: 1 << 4,
+  jump: 1 << 5,
+} as const;
+
+/** Sim event types (mirrors sim/src/events.rs). Records are 4 u32 words. */
+export const EVENT = {
+  jump: 1,
+  land: 2,
+} as const;
+export const EVENT_WORDS = 4;
