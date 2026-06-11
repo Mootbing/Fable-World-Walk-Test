@@ -70,10 +70,14 @@ Dev server runs on **port 3001** (3000 belongs to another app on this machine).
   spinning wheels), speedometer + "Press E" toast. *Verified:* 26 Rust
   tests (accel/brake/reverse, curve, handbrake slide, wall crash+stop,
   enter/drive/exit round trip), smoke drives the car in-browser.
-- [ ] **PR7 `feat: vehicle variety + instanced entity renderer kit`** —
-  archetype pools (sedan/hatch/van/taxi/police + shared wheel pool, palette
-  via instanceColor, liveries); debug spawn row. *Accept:* 50 parked cars at
-  steady fps; each class feels distinct.
+- [x] **PR7 `feat: vehicle variety + instanced entity renderer kit`** —
+  six kinds (sedan/hatch/van/taxi/police/sport) with per-class handling
+  specs in Rust (`VehicleSpec` table) + render kits in TS; InstancedMesh
+  pools (per-kind body+cabin, shared wheel pool, livery topper pool) with
+  per-instance palette paint — constant draw calls at any fleet size;
+  `spawnRow` debug cmd; HUD shows vehicle name. *Verified:* 27 Rust tests
+  (class envelopes ordered van<sedan<sport), smoke spawns 24-car fleet with
+  ≤2 new scene meshes + screenshot.
 - [ ] **PR8 `feat: road graph extraction from MVT transportation layer`** —
   parse `transportation` from the already-fetched z14 MVTs in JS
   (`engine/roads.ts`, clip to tile bounds), upload polylines+attrs; Rust graph

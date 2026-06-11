@@ -98,6 +98,20 @@ export function installTestHook(engine: WorldEngine): () => void {
           engine.sim?.setPlayerPos(x, z);
           return true;
         }
+        // Debug: spawn a grid of vehicles cycling through all kinds.
+        case "spawnRow": {
+          const [n] = args as [number];
+          if (!engine.sim) return 0;
+          for (let i = 0; i < n; i++) {
+            engine.sim.spawnVehicle(
+              engine.playerX + 6 + (i % 6) * 4.5,
+              engine.playerZ - 10 - Math.floor(i / 6) * 8,
+              0,
+              i % 6,
+            );
+          }
+          return n;
+        }
         case "unlock":
           useHud.setState({ locked: false });
           return true;
