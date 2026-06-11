@@ -10,7 +10,9 @@
     "typecheck": "tsc --noEmit",
     "sim:build": "wasm-pack build sim --target web --release && node scripts/copy-wasm.mjs",
     "sim:dev": "wasm-pack build sim --target web --dev && node scripts/copy-wasm.mjs",
-    "sim:test": "cargo test --manifest-path sim/Cargo.toml"
+    "sim:test": "cargo test --manifest-path sim/Cargo.toml",
+    "smoke": "node scripts/smoke.mjs",
+    "fixtures:capture": "node scripts/capture-fixtures.mjs"
   },
   "dependencies": {
     "@mapbox/vector-tile": "^2.0.3",
@@ -24,6 +26,7 @@
     "zustand": "5.0.14"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@types/node": "^24",
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",

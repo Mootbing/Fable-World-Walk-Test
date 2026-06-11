@@ -8,6 +8,7 @@ import * as THREE from "three";
 import { WorldEngine } from "@/engine/engine";
 import { CONFIG } from "@/engine/config";
 import { useHud, LOCK_EVENT } from "@/engine/store";
+import { installTestHook } from "@/engine/testHook";
 
 function Scene({ engine }: { engine: WorldEngine }) {
   const camera = useThree((s) => s.camera);
@@ -113,6 +114,8 @@ export default function World() {
   const engineRef = useRef<WorldEngine | null>(null);
   engineRef.current ??= new WorldEngine();
   const engine = engineRef.current;
+
+  useEffect(() => installTestHook(engine), [engine]);
 
   useEffect(() => {
     return () => {

@@ -9,6 +9,10 @@
 /public/sim_bg.wasm
 # machine-specific cargo config (linker workaround)
 /.cargo/
+
+# playwright
+/test-results/
+/playwright-report/
 .DS_Store
 *.pem
 npm-debug.log*
