@@ -355,15 +355,29 @@ impl Sim {
     }
 
     pub fn weapon_clip(&self) -> u32 {
-        self.weapons.clip
+        self.weapons.clip[self.weapons.equipped as usize]
     }
 
     pub fn weapon_reserve(&self) -> u32 {
-        self.weapons.reserve
+        self.weapons.reserve[self.weapons.equipped as usize]
     }
 
     pub fn weapon_reloading(&self) -> bool {
         self.weapons.reloading()
+    }
+
+    /// Bitmask of owned weapon slots (wheel UI).
+    pub fn weapons_owned(&self) -> u32 {
+        self.weapons.owned_mask()
+    }
+
+    pub fn equip_weapon(&mut self, id: u32) {
+        self.weapons.equip(id);
+    }
+
+    /// Grant a weapon + ammo (shops, missions, debug).
+    pub fn give_weapon(&mut self, id: u32, ammo: u32) {
+        self.weapons.give(id, ammo);
     }
 
     /// Debug/test: a stationary ped at (x,z).
@@ -528,41 +542,53 @@ impl Sim {
             self.events.push(EV_RELOAD, 0, 0, 0);
         }
 
-        // Pistol: RMB aims, LMB fires hitscan along the camera yaw.
-        if self.driving.is_none()
-            && self.player.enabled
-            && self.weapons.equipped == weapons::WEAPON_PISTOL
-            && self.input.is_down(input::BTN_AIM)
-            && self.input.pressed(input::BTN_FIRE)
+        // Ranged: RMB aims, LMB fires hitscan along the camera yaw.
+        // Auto weapons fire while held; the rest on the rising edge.
         {
-            if self.weapons.try_fire() {
-                self.fire_pistol();
-            } else if self.weapons.clip == 0 && !self.weapons.reloading() {
-                self.events.push(EV_DRYFIRE, 0, 0, 0);
-                if self.weapons.start_reload() {
-                    self.events.push(EV_RELOAD, 0, 0, 0);
+            let s = weapons::spec(self.weapons.equipped);
+            let trigger = if s.auto {
+                self.input.is_down(input::BTN_FIRE)
+            } else {
+                self.input.pressed(input::BTN_FIRE)
+            };
+            if self.driving.is_none()
+                && self.player.enabled
+                && !s.melee
+                && self.input.is_down(input::BTN_AIM)
+                && trigger
+            {
+                if self.weapons.try_fire() {
+                    self.fire_ranged();
+                } else if self.weapons.clip[self.weapons.equipped as usize] == 0
+                    && !self.weapons.reloading()
+                    && self.input.pressed(input::BTN_FIRE)
+                {
+                    self.events.push(EV_DRYFIRE, 0, 0, 0);
+                    if self.weapons.start_reload() {
+                        self.events.push(EV_RELOAD, 0, 0, 0);
+                    }
                 }
             }
         }
 
-        // Melee: LMB on foot swings at whatever's in front of the camera
-        // (fists only — with the pistol out, LMB is trigger).
-        self.punch_cooldown = (self.punch_cooldown - SUBSTEP).max(0.0);
+        // Melee: fists or bat swing at whatever's in front of the camera.
         self.punch_anim = (self.punch_anim - SUBSTEP / 0.3).max(0.0);
         if self.driving.is_none()
             && self.player.enabled
-            && self.weapons.equipped == weapons::WEAPON_FIST
+            && weapons::spec(self.weapons.equipped).melee
             && self.input.pressed(input::BTN_FIRE)
-            && self.punch_cooldown <= 0.0
+            && self.weapons.try_swing()
         {
-            self.punch_cooldown = 0.45;
+            let s = weapons::spec(self.weapons.equipped);
             self.punch_anim = 1.0;
             let yaw = self.input.aim_yaw as f64;
             self.player.yaw = yaw;
-            match self.peds.punch(self.player.x, self.player.z, yaw, self.time) {
+            match self
+                .peds
+                .punch(self.player.x, self.player.z, yaw, s.damage, s.range, self.time)
+            {
                 Some((killed, hx, hz)) => {
                     self.events.push(EV_PUNCH, 1, 0, 0);
-                    // Witnesses scatter from violence.
                     self.peds.scatter((self.player.x, self.player.z), 11.0, self.time + 5.0);
                     if killed {
                         self.events.push(EV_PED_KILLED, 0, 0, 0);
@@ -738,70 +764,74 @@ impl Sim {
     }
 
     /// Hitscan along the camera yaw: nearest of building wall, ped, or
-    /// vehicle body wins. 2.5D (heights ignored for now).
-    fn fire_pistol(&mut self) {
-        let yaw = self.input.aim_yaw as f64;
-        self.player.yaw = yaw;
-        let (dx, dz) = (-yaw.sin(), -yaw.cos());
+    /// vehicle body wins, per pellet. 2.5D (heights ignored for now).
+    fn fire_ranged(&mut self) {
+        let s = weapons::spec(self.weapons.equipped);
+        let base_yaw = self.input.aim_yaw as f64;
+        self.player.yaw = base_yaw;
         let (ox, oz) = (self.player.x, self.player.z);
-        let max = weapons::PISTOL_RANGE;
+        let max = s.range;
+        let mut any_loud = false;
 
-        let mut best_t = max;
-        let mut kind = 0u32; // 0 air, 1 building, 2 ped, 3 vehicle
-        let mut ped_idx: Option<usize> = None;
+        for _ in 0..s.pellets {
+            let yaw = base_yaw + (self.rng.next_f32() as f64 * 2.0 - 1.0) * s.spread;
+            let (dx, dz) = (-yaw.sin(), -yaw.cos());
 
-        if let Some(t) = self.collision.raycast(ox, oz, ox + dx * max, oz + dz * max) {
-            best_t = t * max;
-            kind = 1;
-        }
-        if let Some((i, t)) = self.peds.ray_hit(ox, oz, dx, dz, max) {
-            if t < best_t {
-                best_t = t;
-                kind = 2;
-                ped_idx = Some(i);
+            let mut best_t = max;
+            let mut kind = 0u32;
+            let mut ped_idx: Option<usize> = None;
+            if let Some(t) = self.collision.raycast(ox, oz, ox + dx * max, oz + dz * max) {
+                best_t = t * max;
+                kind = 1;
             }
-        }
-        // Vehicle bodies (owned + traffic) as circles; damage lands in PR20.
-        for v in &self.vehicles {
-            if let Some(t) = ray_circle(ox, oz, dx, dz, v.x, v.z, 1.1, max) {
+            if let Some((i, t)) = self.peds.ray_hit(ox, oz, dx, dz, max) {
                 if t < best_t {
                     best_t = t;
-                    kind = 3;
-                    ped_idx = None;
+                    kind = 2;
+                    ped_idx = Some(i);
                 }
             }
-        }
-        for c in &self.traffic.cars {
-            if let Some(t) = ray_circle(ox, oz, dx, dz, c.x, c.z, 1.1, max) {
-                if t < best_t {
-                    best_t = t;
-                    kind = 3;
-                    ped_idx = None;
+            for v in &self.vehicles {
+                if let Some(t) = ray_circle(ox, oz, dx, dz, v.x, v.z, 1.1, max) {
+                    if t < best_t {
+                        best_t = t;
+                        kind = 3;
+                        ped_idx = None;
+                    }
                 }
             }
-        }
+            for c in &self.traffic.cars {
+                if let Some(t) = ray_circle(ox, oz, dx, dz, c.x, c.z, 1.1, max) {
+                    if t < best_t {
+                        best_t = t;
+                        kind = 3;
+                        ped_idx = None;
+                    }
+                }
+            }
 
-        let hx = ox + dx * best_t;
-        let hz = oz + dz * best_t;
-        if let Some(i) = ped_idx {
-            self.peds.scatter((ox, oz), 16.0, self.time + 5.0);
-            if self.peds.apply_damage(i, weapons::PISTOL_DAMAGE, (ox, oz), self.time) {
-                self.events.push(EV_PED_KILLED, 0, 0, 0);
-                let drop = 10 + self.rng.next_below(40) as i64;
-                let y = self.heights.sample(hx, hz).unwrap_or(0.0);
-                self.pickups.spawn(hx, y, hz, pickups::KIND_MONEY, drop as f64);
+            let hx = ox + dx * best_t;
+            let hz = oz + dz * best_t;
+            if let Some(i) = ped_idx {
+                if self.peds.apply_damage(i, s.damage, (ox, oz), self.time) {
+                    self.events.push(EV_PED_KILLED, 0, 0, 0);
+                    let drop = 10 + self.rng.next_below(40) as i64;
+                    let y = self.heights.sample(hx, hz).unwrap_or(0.0);
+                    self.pickups.spawn(hx, y, hz, pickups::KIND_MONEY, drop as f64);
+                }
             }
-        } else if kind != 0 {
-            // Gunfire is loud either way.
+            any_loud = true;
+            self.events.push(
+                EV_GUNSHOT,
+                kind,
+                (hx as f32).to_bits(),
+                (hz as f32).to_bits(),
+            );
+        }
+        if any_loud {
             self.peds.scatter((ox, oz), 16.0, self.time + 5.0);
         }
-        self.events.push(
-            EV_GUNSHOT,
-            kind,
-            (hx as f32).to_bits(),
-            (hz as f32).to_bits(),
-        );
-        self.punch_anim = 1.0; // reuse the arm-extend pose as recoil
+        self.punch_anim = 1.0; // arm-extend pose doubles as recoil
     }
 
     fn nearest_vehicle(&self) -> Option<(usize, f64)> {

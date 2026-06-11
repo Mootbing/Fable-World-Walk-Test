@@ -50,6 +50,7 @@ function Scene({
         forward: frame.forward,
         strafe: frame.strafe,
         toggleRoadDebug: frame.toggleRoadDebug,
+        equipSlot: frame.equipSlot,
       },
       dt,
     );

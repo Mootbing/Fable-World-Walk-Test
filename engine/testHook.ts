@@ -134,6 +134,16 @@ export function installTestHook(engine: WorldEngine): () => void {
         case "roadDebug":
           engine.roadDebug.toggle();
           return engine.roadDebug.visible;
+        case "giveWeapon": {
+          const [id, ammo] = args as [number, number];
+          engine.sim?.giveWeapon(id, ammo ?? 0);
+          return true;
+        }
+        case "equip": {
+          const [id] = args as [number];
+          engine.sim?.equipWeapon(id);
+          return true;
+        }
         case "damage": {
           const [n] = args as [number];
           engine.sim?.damagePlayer(n);

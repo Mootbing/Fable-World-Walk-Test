@@ -9,7 +9,7 @@ import { ENTITY_STRIDE, ENTITY_TYPE, LANE } from "../sim/entityLayout";
  */
 
 const CAPACITY = 64;
-const KIND_COLORS = [0xd8453c, 0x4f8dff, 0x59c96a];
+const KIND_COLORS = [0xd8453c, 0x4f8dff, 0x59c96a, 0x3a3f47, 0xc7a23a, 0x8a6240, 0x2d3138, 0x46332a];
 
 export class PickupPools {
   readonly group = new THREE.Group();

@@ -20,6 +20,8 @@ import { extractPlaces, resolveArea, Place } from "./places";
 import type { CameraClamp } from "./render/cameraRig";
 import { useHud } from "./store";
 
+export const WEAPON_NAMES = ["Fists", "Bat", "Pistol", "SMG", "Shotgun"];
+
 export interface MoveInput {
   dirX: number;
   dirZ: number;
@@ -38,6 +40,7 @@ export interface MoveInput {
   forward: number;
   strafe: number;
   toggleRoadDebug: boolean;
+  equipSlot: number | null;
 }
 
 const DIFF_INTERVAL = 0.25;
@@ -251,6 +254,7 @@ export class WorldEngine {
         (input.aim ? BTN.aim : 0) |
         (input.reload ? BTN.reload : 0) |
         (input.switchWeapon ? BTN.switchWeapon : 0);
+      if (input.equipSlot !== null) this.sim.equipWeapon(input.equipSlot);
       this.sim.setInput(
         buttons,
         input.moving ? input.dirX : 0,
@@ -360,9 +364,16 @@ export class WorldEngine {
         weapon: (() => {
           if (!this.sim) return null;
           const w = this.sim.weaponState();
-          if (w.equipped !== 1) return null;
-          return { name: "Pistol", clip: w.clip, reserve: w.reserve, reloading: w.reloading };
+          if (w.equipped === 0) return null; // bare fists: no HUD line
+          return {
+            name: WEAPON_NAMES[w.equipped] ?? "?",
+            clip: w.clip,
+            reserve: w.reserve,
+            reloading: w.reloading,
+          };
         })(),
+        weaponsOwned: this.sim ? this.sim.weaponsOwned() : 1,
+        weaponEquipped: this.sim ? this.sim.weaponState().equipped : 0,
       });
       const area = resolveArea(this.placeTiles.values(), this.playerX, this.playerZ);
       if (area && area !== this.currentArea) {
