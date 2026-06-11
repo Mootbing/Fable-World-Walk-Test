@@ -23,6 +23,11 @@ interface HudState {
   toast: string;
   /** Full-screen map overlay open. */
   mapOpen: boolean;
+  /** Weapon wheel held open (Tab). */
+  wheelOpen: boolean;
+  /** Owned-weapon bitmask + equipped id for the wheel. */
+  weaponsOwned: number;
+  weaponEquipped: number;
   /** Area-name toast (set on neighborhood change; component fades it). */
   areaToast: string;
   health: number;
@@ -53,6 +58,9 @@ export const useHud = create<HudState>(() => ({
   vehicle: null,
   toast: "",
   mapOpen: false,
+  wheelOpen: false,
+  weaponsOwned: 1,
+  weaponEquipped: 0,
   areaToast: "",
   clock: "12:00",
   health: 100,

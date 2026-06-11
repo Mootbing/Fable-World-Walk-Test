@@ -24,6 +24,8 @@ export interface InputFrame {
   toggleCamera: boolean;
   /** Rising-edge of the road-graph debug overlay key (G). */
   toggleRoadDebug: boolean;
+  /** Weapon slot requested via Digit1-5 this frame, or null. */
+  equipSlot: number | null;
 }
 
 const SENSITIVITY = 0.0022;
@@ -41,6 +43,7 @@ export class InputManager {
   private pitchAcc = 0;
   private toggleEdge = false;
   private roadDebugEdge = false;
+  private equipEdge: number | null = null;
   private element: HTMLElement | null = null;
   private detachFns: (() => void)[] = [];
 
@@ -59,6 +62,13 @@ export class InputManager {
       this.keys[e.code] = true;
       if (e.code === "KeyV" && !e.repeat && this.locked()) this.toggleEdge = true;
       if (e.code === "KeyG" && !e.repeat && this.locked()) this.roadDebugEdge = true;
+      if (e.code === "Tab") {
+        e.preventDefault(); // keep focus; Tab is the weapon wheel
+        if (!e.repeat && this.locked()) useHud.setState({ wheelOpen: true });
+      }
+      if (/^Digit[1-5]$/.test(e.code) && !e.repeat && this.locked()) {
+        this.equipEdge = Number(e.code.slice(5)) - 1;
+      }
       if (e.code === "KeyM" && !e.repeat) {
         // Map toggle: opening releases pointer lock so the cursor can
         // click; closing re-locks (keydown carries user activation).
@@ -74,6 +84,7 @@ export class InputManager {
     });
     on(window, "keyup", (e: KeyboardEvent) => {
       this.keys[e.code] = false;
+      if (e.code === "Tab") useHud.setState({ wheelOpen: false });
     });
     on(window, "blur", () => {
       this.keys = {};
@@ -129,11 +140,13 @@ export class InputManager {
       pitchDelta: this.pitchAcc,
       toggleCamera: this.toggleEdge,
       toggleRoadDebug: this.roadDebugEdge,
+      equipSlot: this.equipEdge,
     };
     this.yawAcc = 0;
     this.pitchAcc = 0;
     this.toggleEdge = false;
     this.roadDebugEdge = false;
+    this.equipEdge = null;
     return frame;
   }
 }

@@ -210,6 +210,18 @@ export class SimBridge {
     return this.sim.debug_spawn_traffic(x, z, yaw, kind);
   }
 
+  weaponsOwned(): number {
+    return this.sim.weapons_owned();
+  }
+
+  equipWeapon(id: number): void {
+    this.sim.equip_weapon(id);
+  }
+
+  giveWeapon(id: number, ammo: number): void {
+    this.sim.give_weapon(id, ammo);
+  }
+
   weaponState(): { equipped: number; clip: number; reserve: number; reloading: boolean } {
     return {
       equipped: this.sim.weapon_equipped(),

@@ -10,6 +10,9 @@ pub const KIND_ARMOR: u32 = 1;
 pub const KIND_MONEY: u32 = 2;
 pub const KIND_PISTOL: u32 = 3;
 pub const KIND_AMMO: u32 = 4;
+pub const KIND_BAT: u32 = 5;
+pub const KIND_SMG: u32 = 6;
+pub const KIND_SHOTGUN: u32 = 7;
 
 const COLLECT_RADIUS: f64 = 1.3;
 
@@ -63,8 +66,11 @@ impl Pickups {
                 match p.kind {
                     KIND_HEALTH => stats.heal(p.value),
                     KIND_ARMOR => stats.add_armor(p.value),
-                    KIND_PISTOL => weapons.give_pistol(p.value as u32),
-                    KIND_AMMO => weapons.reserve += p.value as u32,
+                    KIND_PISTOL => weapons.give(crate::weapons::WEAPON_PISTOL, p.value as u32),
+                    KIND_AMMO => weapons.give_ammo(p.value as u32),
+                    KIND_BAT => weapons.give(crate::weapons::WEAPON_BAT, 0),
+                    KIND_SMG => weapons.give(crate::weapons::WEAPON_SMG, p.value as u32),
+                    KIND_SHOTGUN => weapons.give(crate::weapons::WEAPON_SHOTGUN, p.value as u32),
                     _ => stats.add_money(p.value as i64),
                 }
                 events.push(EV_PICKUP, p.kind, (p.value as f32).to_bits(), 0);

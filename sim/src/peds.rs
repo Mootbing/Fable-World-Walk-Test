@@ -214,8 +214,15 @@ impl Peds {
 
     /// Swing at the nearest ped within reach and a forward arc. Returns
     /// (killed, x, z) on contact.
-    pub fn punch(&mut self, px: f64, pz: f64, yaw: f64, time: f64) -> Option<(bool, f64, f64)> {
-        const REACH: f64 = 1.8;
+    pub fn punch(
+        &mut self,
+        px: f64,
+        pz: f64,
+        yaw: f64,
+        damage: f64,
+        reach: f64,
+        time: f64,
+    ) -> Option<(bool, f64, f64)> {
         let (fx, fz) = (-(yaw.sin()), -(yaw.cos()));
         let mut best: Option<(usize, f64)> = None;
         for (i, p) in self.peds.iter().enumerate() {
@@ -225,7 +232,7 @@ impl Peds {
             let dx = p.x - px;
             let dz = p.z - pz;
             let d = (dx * dx + dz * dz).sqrt();
-            if d > REACH {
+            if d > reach {
                 continue;
             }
             let cos = (dx * fx + dz * fz) / d.max(0.01);
@@ -238,7 +245,7 @@ impl Peds {
         }
         let (i, _) = best?;
         let (x, z) = (self.peds[i].x, self.peds[i].z);
-        let killed = self.apply_damage(i, 12.0, (px, pz), time);
+        let killed = self.apply_damage(i, damage, (px, pz), time);
         Some((killed, x, z))
     }
 
