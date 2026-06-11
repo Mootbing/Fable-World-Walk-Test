@@ -7,6 +7,9 @@ export const CONFIG = {
   spawnLat: num(process.env.NEXT_PUBLIC_SPAWN_LAT, 40.758),
   spawnLon: num(process.env.NEXT_PUBLIC_SPAWN_LON, -73.9855),
 
+  /** World seed for all deterministic sim randomness (traffic, peds, ...). */
+  seed: num(process.env.NEXT_PUBLIC_SEED, 1337),
+
   /** Chunk unit. Fixed: AWS terrarium tiles top out at z15. */
   terrainZoom: 15,
   /** Ground texture zoom; each chunk composites a 2^(iz-15) square of tiles. */

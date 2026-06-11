@@ -14,6 +14,9 @@ interface HudState {
   tilesInFlight: number;
   chunks: number;
   buildingsNote: string;
+  /** Wasm sim heartbeat: substep counter and last step() cost. */
+  simTick: number;
+  simMs: number;
 }
 
 /**
@@ -30,4 +33,6 @@ export const useHud = create<HudState>(() => ({
   tilesInFlight: 0,
   chunks: 0,
   buildingsNote: "",
+  simTick: 0,
+  simMs: 0,
 }));
