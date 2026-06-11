@@ -9,6 +9,8 @@ export interface InputFrame {
   jump: boolean;
   /** Enter/exit vehicle key held (the sim edge-detects). */
   enter: boolean;
+  /** Horn key held (driving). */
+  horn: boolean;
   /** Mouse deltas already scaled to radians. */
   yawDelta: number;
   pitchDelta: number;
@@ -90,6 +92,7 @@ export class InputManager {
       sprint: locked && !!(k.ShiftLeft || k.ShiftRight),
       jump: locked && !!k.Space,
       enter: locked && !!k.KeyE,
+      horn: locked && !!k.KeyH,
       yawDelta: this.yawAcc,
       pitchDelta: this.pitchAcc,
       toggleCamera: this.toggleEdge,

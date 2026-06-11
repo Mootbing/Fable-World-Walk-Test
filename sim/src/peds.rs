@@ -23,6 +23,14 @@ fn walkable(class: u8) -> bool {
     (2..=6).contains(&class)
 }
 
+pub enum PedState {
+    Walking,
+    /// Running away from a point until the deadline, then despawn.
+    Fleeing { from: (f64, f64), until: f64 },
+    /// Knocked down; gets up into Fleeing.
+    Down { until: f64 },
+}
+
 enum Mode {
     /// Walking the sidewalk of `edge` at arc `s`, direction `dir`.
     Rail,
@@ -53,6 +61,7 @@ pub struct Ped {
     jitter: f64,
     walk_speed: f64,
     mode: Mode,
+    pub state: PedState,
     smooth_ground: Option<f64>,
 }
 
@@ -83,6 +92,106 @@ impl Peds {
         self.peds.len() as u32
     }
 
+    /// Scare every ped within `radius` of `from` into fleeing.
+    pub fn scatter(&mut self, from: (f64, f64), radius: f64, until: f64) {
+        for p in &mut self.peds {
+            if matches!(p.state, PedState::Down { .. }) {
+                continue;
+            }
+            let d = ((p.x - from.0).powi(2) + (p.z - from.1).powi(2)).sqrt();
+            if d < radius {
+                p.state = PedState::Fleeing { from, until };
+            }
+        }
+    }
+
+    /// Spawn an already-fleeing ped (carjacked drivers bail out here).
+    pub fn spawn_fleeing(
+        &mut self,
+        x: f64,
+        z: f64,
+        from: (f64, f64),
+        until: f64,
+        rng: &mut Pcg32,
+    ) {
+        self.peds.push(Ped {
+            id: self.next_id,
+            variant: rng.next_below(PED_VARIANTS),
+            x,
+            y: 0.0,
+            z,
+            yaw: 0.0,
+            speed: 0.0,
+            gait: 0.0,
+            edge: u32::MAX, // off-rail; despawned only by distance/timer
+            s: 0.0,
+            dir: 1.0,
+            side: 1.0,
+            jitter: 0.0,
+            walk_speed: 1.4,
+            mode: Mode::Rail,
+            state: PedState::Fleeing { from, until },
+            smooth_ground: None,
+        });
+        self.next_id += 1;
+    }
+
+    /// Knock down peds the vehicle body touches at speed; returns hits as
+    /// (x, z, impact_speed) for event emission.
+    pub fn vehicle_hits(
+        &mut self,
+        vx: f64,
+        vz: f64,
+        yaw: f64,
+        half_length: f64,
+        speed: f64,
+        time: f64,
+    ) -> Vec<(f64, f64, f64)> {
+        let mut hits = Vec::new();
+        if speed.abs() < 1.5 {
+            return hits;
+        }
+        let (fx, fz) = (-(yaw.sin()), -(yaw.cos()));
+        for p in &mut self.peds {
+            if matches!(p.state, PedState::Down { .. }) {
+                continue;
+            }
+            // Distance to the car's spine segment.
+            let mut best = f64::INFINITY;
+            for off in [-half_length, 0.0, half_length] {
+                let cx = vx + fx * off;
+                let cz = vz + fz * off;
+                let d = ((p.x - cx).powi(2) + (p.z - cz).powi(2)).sqrt();
+                best = best.min(d);
+            }
+            if best < 1.35 {
+                p.state = PedState::Down { until: time + 2.5 };
+                // Shove the ped away from the car.
+                let dx = p.x - vx;
+                let dz = p.z - vz;
+                let d = (dx * dx + dz * dz).sqrt().max(0.1);
+                p.x += dx / d * 1.4;
+                p.z += dz / d * 1.4;
+                hits.push((p.x, p.z, speed.abs()));
+            }
+        }
+        hits
+    }
+
+    pub fn fleeing_count(&self) -> u32 {
+        self.peds
+            .iter()
+            .filter(|p| matches!(p.state, PedState::Fleeing { .. }))
+            .count() as u32
+    }
+
+    pub fn down_count(&self) -> u32 {
+        self.peds
+            .iter()
+            .filter(|p| matches!(p.state, PedState::Down { .. }))
+            .count() as u32
+    }
+
     pub fn despawn_edges(&mut self, removed: &[u32]) {
         let set: std::collections::HashSet<u32> = removed.iter().copied().collect();
         self.peds.retain(|p| !set.contains(&p.edge));
@@ -95,6 +204,7 @@ impl Peds {
         collision: &CollisionWorld,
         player: (f64, f64),
         rng: &mut Pcg32,
+        time: f64,
         dt: f64,
     ) {
         self.spawn_timer += dt;
@@ -113,6 +223,71 @@ impl Peds {
         let mut i = 0;
         while i < self.peds.len() {
             let mut alive = true;
+
+            // --- reaction states bypass the rails entirely ---
+            match self.peds[i].state {
+                PedState::Down { until } => {
+                    let p = &mut self.peds[i];
+                    p.speed = 0.0;
+                    if time >= until {
+                        p.state = PedState::Fleeing {
+                            from: (p.x - p.yaw.sin(), p.z - p.yaw.cos()),
+                            until: time + 5.0,
+                        };
+                    }
+                    if let Some(g) = heights.sample(p.x, p.z) {
+                        p.y = g;
+                    }
+                    let dx = p.x - player.0;
+                    let dz = p.z - player.1;
+                    if (dx * dx + dz * dz).sqrt() > DESPAWN_BEYOND || time >= until + 30.0 {
+                        self.peds.swap_remove(i);
+                    } else {
+                        i += 1;
+                    }
+                    continue;
+                }
+                PedState::Fleeing { from, until } => {
+                    let p = &mut self.peds[i];
+                    if time >= until {
+                        self.peds.swap_remove(i);
+                        continue;
+                    }
+                    let dx = p.x - from.0;
+                    let dz = p.z - from.1;
+                    let d = (dx * dx + dz * dz).sqrt().max(0.3);
+                    let run = 3.0;
+                    p.speed += (run - p.speed) * (dt * 5.0).min(1.0);
+                    let nx = p.x + dx / d * p.speed * dt;
+                    let nz = p.z + dz / d * p.speed * dt;
+                    let (rx, rz) = collision.resolve(nx, nz, PED_RADIUS);
+                    p.x = rx;
+                    p.z = rz;
+                    p.gait += p.speed * dt;
+                    let target_yaw = (-(dx / d)).atan2(-(dz / d));
+                    let mut dy = target_yaw - p.yaw;
+                    dy = dy.sin().atan2(dy.cos());
+                    p.yaw += dy * (dt * 10.0).min(1.0);
+                    if let Some(g) = heights.sample(p.x, p.z) {
+                        let smooth = match p.smooth_ground {
+                            Some(sg) => sg + (g - sg) * (dt * 8.0).min(1.0),
+                            None => g,
+                        };
+                        p.smooth_ground = Some(smooth);
+                        p.y = smooth;
+                    }
+                    let pdx = p.x - player.0;
+                    let pdz = p.z - player.1;
+                    if (pdx * pdx + pdz * pdz).sqrt() > DESPAWN_BEYOND {
+                        self.peds.swap_remove(i);
+                    } else {
+                        i += 1;
+                    }
+                    continue;
+                }
+                PedState::Walking => {}
+            }
+
             // --- speed control ---
             let mut target_speed = self.peds[i].walk_speed;
             if !self.peds[i].crossing() {
@@ -316,6 +491,7 @@ impl Peds {
                 jitter: (rng.next_f32() as f64 - 0.5) * 1.6,
                 walk_speed: 1.0 + rng.next_f32() as f64 * 0.7,
                 mode: Mode::Rail,
+                state: PedState::Walking,
                 smooth_ground: None,
             });
             self.next_id += 1;
@@ -368,16 +544,16 @@ mod tests {
         let mut peds = Peds::new();
         peds.target = 12;
         let mut rng = Pcg32::new(3);
-        for _ in 0..1200 {
-            peds.substep(&g, &hg, &cw, (0.0, 0.0), &mut rng, DT);
+        for step in 0..1200 {
+            peds.substep(&g, &hg, &cw, (0.0, 0.0), &mut rng, step as f64 * DT, DT);
         }
         assert!(peds.count() >= 8, "spawned {}", peds.count());
         for p in &peds.peds {
             assert!(p.x.is_finite() && p.z.is_finite());
         }
         // Walk away: everyone despawns.
-        for _ in 0..600 {
-            peds.substep(&g, &hg, &cw, (5_000.0, 0.0), &mut rng, DT);
+        for step in 0..600 {
+            peds.substep(&g, &hg, &cw, (5_000.0, 0.0), &mut rng, step as f64 * DT, DT);
         }
         assert_eq!(peds.count(), 0);
     }
@@ -390,12 +566,12 @@ mod tests {
         let mut peds = Peds::new();
         peds.target = 10;
         let mut rng = Pcg32::new(9);
-        for _ in 0..900 {
-            peds.substep(&g, &hg, &cw, (0.0, 0.0), &mut rng, DT);
+        for step in 0..900 {
+            peds.substep(&g, &hg, &cw, (0.0, 0.0), &mut rng, step as f64 * DT, DT);
         }
         let before: Vec<(u32, f64, f64)> = peds.peds.iter().map(|p| (p.id, p.x, p.z)).collect();
-        for _ in 0..900 {
-            peds.substep(&g, &hg, &cw, (0.0, 0.0), &mut rng, DT);
+        for step in 0..900 {
+            peds.substep(&g, &hg, &cw, (0.0, 0.0), &mut rng, step as f64 * DT, DT);
         }
         let mut moved = 0;
         for (id, x, z) in &before {
@@ -470,12 +646,13 @@ mod tests {
             jitter: 0.0,
             walk_speed: 1.4,
             mode: Mode::Rail,
+            state: PedState::Walking,
             smooth_ground: None,
         });
         // Clamp s into the edge actually picked (length 100): start at 5.
         peds.peds[0].s = 5.0;
-        for _ in 0..600 {
-            peds.substep(&g, &hg, &cw, (0.0, 0.0), &mut rng, DT);
+        for step in 0..600 {
+            peds.substep(&g, &hg, &cw, (0.0, 0.0), &mut rng, step as f64 * DT, DT);
         }
         // Never inside the footprint interior.
         let p = &peds.peds[0];

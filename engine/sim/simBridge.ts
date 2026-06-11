@@ -183,6 +183,11 @@ export class SimBridge {
     this.sim.set_ped_target(n);
   }
 
+  /** Spawn a parked traffic car at an exact spot (debug/tests). */
+  debugSpawnTraffic(x: number, z: number, yaw: number, kind: number): number {
+    return this.sim.debug_spawn_traffic(x, z, yaw, kind);
+  }
+
   nearestVehicleDist(): number {
     return this.sim.nearest_vehicle_dist();
   }

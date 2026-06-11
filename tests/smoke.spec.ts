@@ -213,6 +213,27 @@ test("boots from fixtures, sim ticks, player walks", async ({ page }) => {
   });
   await page.screenshot({ path: "test-results/peds.png" });
 
+  // PR12: carjacking — a taxi parked 3m west gets jacked with E (the
+  // starter car is 10m away, out of range), then horn scatters.
+  await page.evaluate(() => window.__ww!.cmd("warpPlayer", 0, 0));
+  await page.evaluate(() => window.__ww!.cmd("spawnTraffic", -3, 0, 3));
+  await page.waitForTimeout(300);
+  await page.evaluate(() => window.__ww!.press("KeyE", 120));
+  await page.waitForFunction(() => window.__ww!.query("driving") === true, undefined, {
+    timeout: 3_000,
+  });
+  await page.evaluate(() => window.__ww!.press("KeyH", 120));
+  await page.waitForTimeout(500);
+  const log12 = (await page.evaluate(() => window.__ww!.query("eventLog"))) as number[];
+  const types12 = [];
+  for (let i = 0; i < log12.length; i += 4) types12.push(log12[i]);
+  expect(types12).toContain(8); // CARJACK
+  expect(types12).toContain(6); // HORN
+  await page.evaluate(() => window.__ww!.press("KeyE", 120));
+  await page.waitForFunction(() => window.__ww!.query("driving") === false, undefined, {
+    timeout: 3_000,
+  });
+
   // World actually meshed: 9 terrain chunks alone are ~295k triangles, and
   // Times Square building tiles add meshes on top.
   const render = (await page.evaluate(() => window.__ww!.query("render"))) as {

@@ -24,6 +24,7 @@ export interface MoveInput {
   sprint: boolean;
   jump: boolean;
   enter: boolean;
+  horn: boolean;
   /** Raw -1..1 axes for vehicles (throttle / steering). */
   forward: number;
   strafe: number;
@@ -215,7 +216,8 @@ export class WorldEngine {
       const buttons =
         (input.sprint ? BTN.sprint : 0) |
         (input.jump ? BTN.jump : 0) |
-        (input.enter ? BTN.enter : 0);
+        (input.enter ? BTN.enter : 0) |
+        (input.horn ? BTN.horn : 0);
       this.sim.setInput(
         buttons,
         input.moving ? input.dirX : 0,

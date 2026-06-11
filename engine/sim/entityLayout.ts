@@ -38,6 +38,8 @@ export const STATE_FLAG = {
   inVehicle: 2,
   /** IDM decelerating hard (brake lights, PR29 visuals). */
   braking: 4,
+  fleeing: 8,
+  down: 16,
 } as const;
 
 /** Input button bitfield (mirrors sim/src/input.rs). */
@@ -46,6 +48,8 @@ export const BTN = {
   /** On foot: jump. Driving: handbrake. */
   jump: 1 << 5,
   enter: 1 << 6,
+  /** Horn while driving. */
+  horn: 1 << 7,
 } as const;
 
 /** Sim event types (mirrors sim/src/events.rs). Records are 4 u32 words. */
@@ -55,5 +59,8 @@ export const EVENT = {
   vehicleEnter: 3,
   vehicleExit: 4,
   crash: 5,
+  horn: 6,
+  pedHit: 7,
+  carjack: 8,
 } as const;
 export const EVENT_WORDS = 4;

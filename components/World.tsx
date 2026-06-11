@@ -40,6 +40,7 @@ function Scene({
         sprint: frame.sprint,
         jump: frame.jump,
         enter: frame.enter,
+        horn: frame.horn,
         forward: frame.forward,
         strafe: frame.strafe,
         toggleRoadDebug: frame.toggleRoadDebug,

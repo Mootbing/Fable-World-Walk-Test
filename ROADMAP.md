@@ -125,8 +125,15 @@ Dev server runs on **port 3001** (3000 belongs to another app on this machine).
   (torso/head/arm/leg, shirt palette via instanceColor, gait swing from
   the animPhase lane). *Verified:* 45 Rust tests; smoke: ≥5 peds strolling
   real sidewalks.
-- [ ] **PR12 `feat: ped/vehicle interactions + carjacking + horn`** — traffic
-  drivers, E yanks driver (flee), horn (H) scatters, vehicle-vs-ped knockdown.
+- [x] **PR12 `feat: ped/vehicle interactions + carjacking + horn`** — ped
+  state machine (Walking/Fleeing/Down): E on a traffic car carjacks it
+  (car converts to owned Vehicle, driver bails the far door and flees,
+  EV_CARJACK), H horn scatters peds within 14 m (EV_HORN), car body
+  contact ≥1.5 m/s knocks peds down (tip-flat render pose, EV_PED_HIT,
+  get up → flee); off-grid parked traffic (debug_spawn_traffic) for
+  setups/tests; "Press E" toast now includes traffic cars. *Verified:*
+  47 Rust tests (carjack consumes traffic + spawns fleeing driver,
+  knockdown), smoke carjacks a spawned taxi + honks in-browser.
 - [ ] **PR13 `feat: radar minimap`** — canvas radar from road polylines,
   rotates with heading, blip API, cached per-tile backdrops.
 - [ ] **PR14 `feat: full map + waypoint + GPS routing`** — M pannable map,
