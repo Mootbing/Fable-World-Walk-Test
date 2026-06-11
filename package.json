@@ -3,10 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "typecheck": "tsc --noEmit"
+    "predev": "npm run sim:dev",
+    "dev": "next dev -p 3001",
+    "build": "npm run sim:build && next build",
+    "start": "next start -p 3001",
+    "typecheck": "tsc --noEmit",
+    "sim:build": "wasm-pack build sim --target web --release && node scripts/copy-wasm.mjs",
+    "sim:dev": "wasm-pack build sim --target web --dev && node scripts/copy-wasm.mjs",
+    "sim:test": "cargo test --manifest-path sim/Cargo.toml"
   },
   "dependencies": {
     "@mapbox/vector-tile": "^2.0.3",

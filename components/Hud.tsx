@@ -11,6 +11,8 @@ export default function Hud() {
   const tilesInFlight = useHud((s) => s.tilesInFlight);
   const chunks = useHud((s) => s.chunks);
   const buildingsNote = useHud((s) => s.buildingsNote);
+  const simTick = useHud((s) => s.simTick);
+  const simMs = useHud((s) => s.simMs);
 
   return (
     <>
@@ -18,6 +20,7 @@ export default function Hud() {
       <div className="hud-panel">
         {`${lat.toFixed(5)}, ${lon.toFixed(5)}  ·  ${elev.toFixed(1)} m`}
         {`\n${fps} fps  ·  ${chunks} chunks  ·  ${tilesInFlight} tiles loading`}
+        {simTick > 0 && `\nsim #${simTick}  ·  ${simMs.toFixed(2)} ms`}
         {buildingsNote && <span className="hud-warn">{`\n${buildingsNote}`}</span>}
       </div>
       <div className="attribution">

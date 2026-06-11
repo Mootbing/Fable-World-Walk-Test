@@ -2,6 +2,13 @@
 /.next/
 /out/
 /build
+
+# Rust/wasm build outputs (rebuilt by npm run sim:build)
+/sim/target/
+/sim/pkg/
+/public/sim_bg.wasm
+# machine-specific cargo config (linker workaround)
+/.cargo/
 .DS_Store
 *.pem
 npm-debug.log*

@@ -7,6 +7,7 @@ import { CollisionWorld } from "./collision";
 import { ChunkManager } from "./chunkManager";
 import { BuildingManager } from "./buildingManager";
 import { Player, MoveInput } from "./player";
+import { SimBridge } from "./sim/simBridge";
 import { useHud } from "./store";
 
 const DIFF_INTERVAL = 0.25;
@@ -24,6 +25,8 @@ export class WorldEngine {
   readonly anchor: WorldAnchor;
   readonly player: Player;
   disposed = false;
+  /** Wasm sim core; null until async boot resolves (or if it fails). */
+  sim: SimBridge | null = null;
 
   private queue: FetchQueue;
   private heights: HeightFieldRegistry;
@@ -49,6 +52,30 @@ export class WorldEngine {
     this.group.add(this.chunks.group, this.buildings.group);
     // Spawn point is the anchor origin by construction.
     this.player = new Player(this.heights, this.collision, 0, 0);
+    void this.bootSim();
+  }
+
+  /**
+   * Boots the wasm sim alongside the streaming world. PR1: the sim only
+   * ticks and proves the readback path; gameplay still lives in TS. Failure
+   * is non-fatal here — that changes once player physics moves in (PR3).
+   */
+  private async bootSim(): Promise<void> {
+    try {
+      const sim = await SimBridge.boot(CONFIG.seed);
+      if (this.disposed) {
+        sim.dispose();
+        return;
+      }
+      this.sim = sim;
+      const avgMs = sim.benchmark(1000);
+      console.info(
+        `[sim] v${SimBridge.version} booted · 1k-entity readback ${avgMs.toFixed(3)} ms/pass`,
+      );
+    } catch (err) {
+      console.error("[sim] wasm boot failed", err);
+      useHud.setState({ buildingsNote: "sim failed to load" });
+    }
   }
 
   update(input: MoveInput, dt: number): void {
@@ -56,6 +83,7 @@ export class WorldEngine {
     this.elapsed += dt;
 
     this.player.update(input, dt);
+    this.sim?.step(dt);
 
     this.diffTimer += dt;
     if (this.diffTimer >= DIFF_INTERVAL) {
@@ -96,6 +124,8 @@ export class WorldEngine {
         elev: this.player.y - CONFIG.eyeHeight,
         chunks: this.chunks.liveCount,
         buildingsNote: this.buildings.failed ? "building data unavailable" : "",
+        simTick: this.sim ? this.sim.tick : 0,
+        simMs: this.sim ? this.sim.lastStepMs : 0,
       });
     }
   }
@@ -104,5 +134,7 @@ export class WorldEngine {
     this.disposed = true;
     this.chunks.disposeAll();
     this.buildings.disposeAll();
+    this.sim?.dispose();
+    this.sim = null;
   }
 }
