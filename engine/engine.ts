@@ -27,6 +27,10 @@ export interface MoveInput {
   jump: boolean;
   enter: boolean;
   horn: boolean;
+  fire: boolean;
+  aim: boolean;
+  /** Camera yaw — melee/aim direction. */
+  aimYaw: number;
   /** Raw -1..1 axes for vehicles (throttle / steering). */
   forward: number;
   strafe: number;
@@ -237,13 +241,16 @@ export class WorldEngine {
         (input.sprint ? BTN.sprint : 0) |
         (input.jump ? BTN.jump : 0) |
         (input.enter ? BTN.enter : 0) |
-        (input.horn ? BTN.horn : 0);
+        (input.horn ? BTN.horn : 0) |
+        (input.fire ? BTN.fire : 0) |
+        (input.aim ? BTN.aim : 0);
       this.sim.setInput(
         buttons,
         input.moving ? input.dirX : 0,
         input.moving ? input.dirZ : 0,
         input.forward,
         input.strafe,
+        input.aimYaw,
       );
       this.sim.step(dt);
       this.playerCache = this.sim.playerPos();

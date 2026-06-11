@@ -21,6 +21,9 @@ pub const EV_PLAYER_DIED: u32 = 9;
 pub const EV_RESPAWN: u32 = 10;
 /// a = pickup kind, b = value (f32 bits).
 pub const EV_PICKUP: u32 = 11;
+/// a = 1 hit / 0 whiff.
+pub const EV_PUNCH: u32 = 12;
+pub const EV_PED_KILLED: u32 = 13;
 
 pub const EVENT_WORDS: usize = 4;
 const MAX_EVENTS: usize = 256;

@@ -8,6 +8,10 @@ pub const BTN_JUMP: u32 = 1 << 5;
 pub const BTN_ENTER: u32 = 1 << 6;
 /// Horn while driving (edge-triggered).
 pub const BTN_HORN: u32 = 1 << 7;
+/// Attack (LMB).
+pub const BTN_FIRE: u32 = 1 << 8;
+/// Aim (RMB) — PR18 ranged.
+pub const BTN_AIM: u32 = 1 << 9;
 
 #[derive(Default)]
 pub struct Input {

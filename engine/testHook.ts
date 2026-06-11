@@ -141,6 +141,10 @@ export function installTestHook(engine: WorldEngine): () => void {
           const [x, z, kind, value] = args as [number, number, number, number];
           return engine.sim ? engine.sim.spawnPickupAt(x, z, kind, value) : 0;
         }
+        case "spawnPed": {
+          const [x, z] = args as [number, number];
+          return engine.sim ? engine.sim.debugSpawnPed(x, z) : 0;
+        }
         case "spawnTraffic": {
           const [x, z, kind] = args as [number, number, number];
           return engine.sim ? engine.sim.debugSpawnTraffic(x, z, 0, kind ?? 0) : 0;

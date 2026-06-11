@@ -335,6 +335,37 @@ test("boots from fixtures, sim ticks, player walks", async ({ page }) => {
   expect(stats1.health).toBe(100);
   expect(stats1.money).toBe(stats0.money + 60 - 100);
 
+  // PR17: melee — spawn a ped at arm's length, swing until the kill event
+  // fires and the dropped cash lands in the wallet.
+  const meleeStart = (await page.evaluate(() => ({
+    player: window.__ww!.query("player"),
+    money: (window.__ww!.query("stats") as { money: number }).money,
+  }))) as { player: { x: number; z: number }; money: number };
+  await page.evaluate(
+    ([x, z]) => window.__ww!.cmd("spawnPed", x, z - 1.2),
+    [meleeStart.player.x, meleeStart.player.z] as [number, number],
+  );
+  await page.waitForTimeout(200);
+  for (let swing = 0; swing < 5; swing++) {
+    await page.evaluate(() => {
+      window.dispatchEvent(new MouseEvent("mousedown", { button: 0 }));
+      setTimeout(() => window.dispatchEvent(new MouseEvent("mouseup", { button: 0 })), 90);
+    });
+    await page.waitForTimeout(650);
+    const money = (await page.evaluate(
+      () => (window.__ww!.query("stats") as { money: number }).money,
+    )) as number;
+    if (money > meleeStart.money) break;
+  }
+  const meleeLog = (await page.evaluate(() => window.__ww!.query("eventLog"))) as number[];
+  const meleeTypes = [];
+  for (let i = 0; i < meleeLog.length; i += 4) meleeTypes.push(meleeLog[i]);
+  expect(meleeTypes).toContain(13); // PED_KILLED
+  const moneyAfterMelee = (await page.evaluate(
+    () => (window.__ww!.query("stats") as { money: number }).money,
+  )) as number;
+  expect(moneyAfterMelee).toBeGreaterThan(meleeStart.money);
+
   // World actually meshed: 9 terrain chunks alone are ~295k triangles, and
   // Times Square building tiles add meshes on top.
   const render = (await page.evaluate(() => window.__ww!.query("render"))) as {

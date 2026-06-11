@@ -210,6 +210,11 @@ export class SimBridge {
     return this.sim.debug_spawn_traffic(x, z, yaw, kind);
   }
 
+  /** Spawn a stationary ped (debug/tests). */
+  debugSpawnPed(x: number, z: number): number {
+    return this.sim.debug_spawn_ped(x, z);
+  }
+
   nearestVehicleDist(): number {
     return this.sim.nearest_vehicle_dist();
   }

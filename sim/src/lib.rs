@@ -16,7 +16,7 @@ pub mod traffic;
 pub mod vehicle;
 
 use collision::{CollisionWorld, Footprint};
-use events::{Events, EV_CARJACK, EV_HORN, EV_PED_HIT, EV_VEHICLE_ENTER, EV_VEHICLE_EXIT};
+use events::{Events, EV_CARJACK, EV_HORN, EV_PED_HIT, EV_PED_KILLED, EV_PUNCH, EV_VEHICLE_ENTER, EV_VEHICLE_EXIT};
 use input::Input;
 use player::Player;
 use terrain::HeightGrid;
@@ -74,6 +74,8 @@ pub struct Sim {
     peds: peds::Peds,
     stats: stats::PlayerStats,
     pickups: pickups::Pickups,
+    punch_cooldown: f64,
+    punch_anim: f64,
     events: Events,
     /// Preallocated at MAX_ENTITIES so the pointer never moves (no wasm
     /// memory growth from the entity buffer itself).
@@ -108,6 +110,8 @@ impl Sim {
             peds: peds::Peds::new(),
             stats: stats::PlayerStats::new(),
             pickups: pickups::Pickups::new(),
+            punch_cooldown: 0.0,
+            punch_anim: 0.0,
             events: Events::new(),
             entities: vec![0.0; MAX_ENTITIES * ENTITY_STRIDE],
             entity_count: 1, // entity 0 is always the player
@@ -342,6 +346,11 @@ impl Sim {
         self.pickups.count()
     }
 
+    /// Debug/test: a stationary ped at (x,z).
+    pub fn debug_spawn_ped(&mut self, x: f64, z: f64) -> u32 {
+        self.peds.debug_spawn_idle(x, z)
+    }
+
     pub fn driving_kind(&self) -> u32 {
         self.driving.map_or(0, |i| self.vehicles[i].kind)
     }
@@ -484,6 +493,34 @@ impl Sim {
             match self.driving {
                 Some(i) => self.exit_vehicle(i),
                 None => self.try_enter_vehicle(),
+            }
+        }
+
+        // Melee: LMB on foot swings at whatever's in front of the camera.
+        self.punch_cooldown = (self.punch_cooldown - SUBSTEP).max(0.0);
+        self.punch_anim = (self.punch_anim - SUBSTEP / 0.3).max(0.0);
+        if self.driving.is_none()
+            && self.player.enabled
+            && self.input.pressed(input::BTN_FIRE)
+            && self.punch_cooldown <= 0.0
+        {
+            self.punch_cooldown = 0.45;
+            self.punch_anim = 1.0;
+            let yaw = self.input.aim_yaw as f64;
+            self.player.yaw = yaw;
+            match self.peds.punch(self.player.x, self.player.z, yaw, self.time) {
+                Some((killed, hx, hz)) => {
+                    self.events.push(EV_PUNCH, 1, 0, 0);
+                    // Witnesses scatter from violence.
+                    self.peds.scatter((self.player.x, self.player.z), 11.0, self.time + 5.0);
+                    if killed {
+                        self.events.push(EV_PED_KILLED, 0, 0, 0);
+                        let drop = 10 + self.rng.next_below(40) as i64;
+                        let y = self.heights.sample(hx, hz).unwrap_or(0.0);
+                        self.pickups.spawn(hx, y, hz, pickups::KIND_MONEY, drop as f64);
+                    }
+                }
+                None => self.events.push(EV_PUNCH, 0, 0, 0),
             }
         }
 
@@ -758,6 +795,7 @@ impl Sim {
         e[6] = half_yaw.cos();
         e[7] = speed as f32;
         e[8] = ((p.gait / STRIDE) % 1.0) as f32;
+        e[9] = self.punch_anim as f32;
         e[11] = 1.0;
         e[12] = f32::from_bits(0);
         e[13] = f32::from_bits(TYPE_PLAYER << 16);
@@ -1039,6 +1077,49 @@ mod tests {
         assert!((sim.player_x()).abs() < 1e-6 && (sim.player_z()).abs() < 1e-6);
         assert_eq!(sim.player_money() as i64, money_before as i64 - 100);
         assert!((sim.player_health() - 100.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn three_punches_kill_and_drop_money() {
+        let mut sim = Sim::new(1, 0.0, 0.0);
+        sim.load_heightfield(0, 0, -500.0, -500.0, 1000.0, &vec![0.0; FIELD_SIZE * FIELD_SIZE]);
+        sim.set_player_enabled(true);
+        for _ in 0..30 {
+            sim.step(SUBSTEP);
+        }
+        // Victim 1.2m north; witness 6m east.
+        sim.debug_spawn_ped(0.0, -1.2);
+        let witness = sim.debug_spawn_ped(6.0, 0.0);
+        let _ = sim.pickup_count();
+        let money_before = sim.player_money() as i64;
+
+        let mut killed = false;
+        for swing in 0..5 {
+            // aim_yaw 0 = facing north (-Z)
+            sim.set_input(input::BTN_FIRE, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+            sim.step(SUBSTEP);
+            sim.set_input(0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+            for _ in 0..30 {
+                sim.step(SUBSTEP); // cooldown window
+            }
+            let evs: Vec<u32> = (0..sim.events_count() as usize * 4)
+                .map(|k| unsafe { *sim.events_ptr().add(k) })
+                .collect();
+            let _ = evs;
+            // The drop lands at arm's length and is hoovered up instantly,
+            // so watch the wallet, not the pickup count.
+            if sim.player_money() as i64 > money_before {
+                killed = true;
+                break;
+            }
+            let _ = swing;
+        }
+        assert!(killed, "victim survived 5 swings");
+        // Witness fled the violence.
+        let w_fleeing = sim.peds.peds.iter().any(|p| {
+            p.id == witness && matches!(p.state, peds::PedState::Fleeing { .. })
+        });
+        assert!(w_fleeing, "witness should flee");
     }
 
     #[test]

@@ -62,6 +62,9 @@ pub struct Ped {
     walk_speed: f64,
     mode: Mode,
     pub state: PedState,
+    pub hp: f64,
+    /// Down + dead: despawn when the timer runs out (corpse linger).
+    pub dead: bool,
     smooth_ground: Option<f64>,
 }
 
@@ -131,9 +134,78 @@ impl Peds {
             walk_speed: 1.4,
             mode: Mode::Rail,
             state: PedState::Fleeing { from, until },
+            hp: 30.0,
+            dead: false,
             smooth_ground: None,
         });
         self.next_id += 1;
+    }
+
+    /// Debug/test: an off-rail ped that just stands there (and can be hit).
+    pub fn debug_spawn_idle(&mut self, x: f64, z: f64) -> u32 {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.peds.push(Ped {
+            id,
+            variant: 0,
+            x,
+            y: 0.0,
+            z,
+            yaw: 0.0,
+            speed: 0.0,
+            gait: 0.0,
+            edge: u32::MAX,
+            s: 0.0,
+            dir: 1.0,
+            side: 1.0,
+            jitter: 0.0,
+            walk_speed: 0.0,
+            mode: Mode::Rail,
+            state: PedState::Walking,
+            hp: 30.0,
+            dead: false,
+            smooth_ground: None,
+        });
+        id
+    }
+
+    /// Swing at the nearest ped within reach and a forward arc. Returns
+    /// (killed, x, z) on contact.
+    pub fn punch(&mut self, px: f64, pz: f64, yaw: f64, time: f64) -> Option<(bool, f64, f64)> {
+        const REACH: f64 = 1.8;
+        let (fx, fz) = (-(yaw.sin()), -(yaw.cos()));
+        let mut best: Option<(usize, f64)> = None;
+        for (i, p) in self.peds.iter().enumerate() {
+            if p.dead {
+                continue; // corpses don't take more
+            }
+            let dx = p.x - px;
+            let dz = p.z - pz;
+            let d = (dx * dx + dz * dz).sqrt();
+            if d > REACH {
+                continue;
+            }
+            let cos = (dx * fx + dz * fz) / d.max(0.01);
+            if cos < 0.5 {
+                continue; // outside the ~60 deg arc
+            }
+            if best.is_none_or(|(_, bd)| d < bd) {
+                best = Some((i, d));
+            }
+        }
+        let (i, _) = best?;
+        let p = &mut self.peds[i];
+        p.hp -= 12.0;
+        if p.hp <= 0.0 {
+            p.dead = true;
+            p.state = PedState::Down { until: time + 4.0 };
+            Some((true, p.x, p.z))
+        } else {
+            // Knockdown stagger — they get up and flee (Down → Fleeing),
+            // and stay punchable on the ground (finishers).
+            p.state = PedState::Down { until: time + 1.2 };
+            Some((false, p.x, p.z))
+        }
     }
 
     /// Knock down peds the vehicle body touches at speed; returns hits as
@@ -230,6 +302,10 @@ impl Peds {
                     let p = &mut self.peds[i];
                     p.speed = 0.0;
                     if time >= until {
+                        if p.dead {
+                            self.peds.swap_remove(i);
+                            continue;
+                        }
                         p.state = PedState::Fleeing {
                             from: (p.x - p.yaw.sin(), p.z - p.yaw.cos()),
                             until: time + 5.0,
@@ -331,7 +407,8 @@ impl Peds {
             self.peds[i].gait += step;
 
             // --- rail end: pick a continuation (possibly crossing) ---
-            if !self.peds[i].crossing() {
+            let off_rail = self.peds[i].edge == u32::MAX;
+            if !self.peds[i].crossing() && !off_rail {
                 let p = &self.peds[i];
                 let Some(edge) = graph.edges.get(p.edge as usize).and_then(|e| e.as_ref())
                 else {
@@ -343,7 +420,17 @@ impl Peds {
                 }
             }
 
-            if alive {
+            if alive && off_rail {
+                let p = &mut self.peds[i];
+                if let Some(g) = heights.sample(p.x, p.z) {
+                    p.y = g;
+                }
+                let dx = p.x - player.0;
+                let dz = p.z - player.1;
+                if (dx * dx + dz * dz).sqrt() > DESPAWN_BEYOND {
+                    alive = false;
+                }
+            } else if alive {
                 // --- placement ---
                 let p = &mut self.peds[i];
                 let (px, pz, yaw) = match &p.mode {
@@ -492,6 +579,8 @@ impl Peds {
                 walk_speed: 1.0 + rng.next_f32() as f64 * 0.7,
                 mode: Mode::Rail,
                 state: PedState::Walking,
+                hp: 30.0,
+                dead: false,
                 smooth_ground: None,
             });
             self.next_id += 1;
@@ -647,6 +736,8 @@ mod tests {
             walk_speed: 1.4,
             mode: Mode::Rail,
             state: PedState::Walking,
+            hp: 30.0,
+            dead: false,
             smooth_ground: None,
         });
         // Clamp s into the edge actually picked (length 100): start at 5.
