@@ -49,13 +49,16 @@ Dev server runs on **port 3001** (3000 belongs to another app on this machine).
   CollisionWorld stays populated as the future camera-occlusion oracle
   (PR5). *Verified:* 21 Rust tests (rowhouse, courtyard, wall-block), smoke
   probes a real Times Square wall via `resolve_probe`.
-- [ ] **PR5 `feat: third-person camera + visible player character`** —
-  `engine/input.ts` (pointer-lock + InputFrame, replaces drei
-  PointerLockControls), `engine/render/cameraRig.ts` (fp/tp-foot modes, V
-  toggle), procedural ped meshes + rigid-limb gait animation
-  (`engine/render/{pedMeshes,pedAnimator,entityPools}.ts`), analytic boom
-  occlusion vs building prisms. *Accept:* see yourself walk/jump from behind;
-  camera never enters buildings; fp unchanged.
+- [x] **PR5 `feat: third-person camera + visible player character`** —
+  `engine/input.ts` (pointer-lock + InputFrame, drei PointerLockControls
+  removed), `engine/render/cameraRig.ts` (fp/tp modes, V toggle, snap-in/
+  relax-out boom, speed-ready shoulder offset), `engine/render/
+  playerAvatar.ts` (rigid-limb gait body from entity-0 lanes — the ped
+  archetype prototype for PR7 pools), analytic boom occlusion: TS
+  CollisionWorld became the prism oracle (`segmentHits` + height span over
+  sampled ground; dead resolve path deleted). Also: postcss override
+  (dependabot alert cleared). *Verified:* smoke toggles tp (camera >1.5m
+  back, avatar visible, screenshot), fp restored; walk/jump unchanged.
 
 ## Phase 2 — Driving
 

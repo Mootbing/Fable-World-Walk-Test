@@ -8,6 +8,8 @@ import { ChunkManager } from "./chunkManager";
 import { BuildingManager } from "./buildingManager";
 import { SimBridge, flattenFootprints, FlatFootprints } from "./sim/simBridge";
 import { BTN } from "./sim/entityLayout";
+import { PlayerAvatar } from "./render/playerAvatar";
+import type { CameraClamp } from "./render/cameraRig";
 import { useHud } from "./store";
 
 export interface MoveInput {
@@ -48,6 +50,11 @@ export class WorldEngine {
   sim: SimBridge | null = null;
   /** Recent sim events for tests/debug (flat 4-word records, newest last). */
   readonly eventLog: number[] = [];
+  /** Visible player body (third person only). */
+  readonly avatar = new PlayerAvatar();
+  /** Renderer-reported camera state, for HUD/tests. */
+  camMode: "fp" | "tp" = "fp";
+  camPos = { x: 0, y: 0, z: 0 };
 
   private queue: FetchQueue;
   private heights: HeightFieldRegistry;
@@ -75,7 +82,7 @@ export class WorldEngine {
     this.heights = new HeightFieldRegistry(this.anchor);
     this.chunks = new ChunkManager(this.anchor, this.queue, this.heights);
     this.buildings = new BuildingManager(this.anchor, this.queue, this.heights, this.collision);
-    this.group.add(this.chunks.group, this.buildings.group);
+    this.group.add(this.chunks.group, this.buildings.group, this.avatar.group);
 
     // Every decoded heightfield mirrors into the sim (queued until boot).
     this.heights.onSet = (tx, ty, originX, originZ, size, field) => {
@@ -159,6 +166,7 @@ export class WorldEngine {
       this.sim.setInput(buttons, input.moving ? input.dirX : 0, input.moving ? input.dirZ : 0);
       this.sim.step(dt);
       this.playerCache = this.sim.playerPos();
+      this.avatar.update(this.sim.entityView(), this.sim.entityViewU32(), this.elapsed);
 
       const events = this.sim.drainEvents();
       if (events.length > 0) {
@@ -213,10 +221,34 @@ export class WorldEngine {
     }
   }
 
+  /**
+   * Occlusion oracle for the third-person boom: exact building prisms
+   * (footprint walls + height span over sampled ground) and terrain floor.
+   */
+  readonly cameraClamp: CameraClamp = {
+    clampBoom: (tx, ty, tz, dx, dy, dz, len) => {
+      const ex = tx + dx * len;
+      const ez = tz + dz * len;
+      let allowed = len;
+      for (const hit of this.collision.segmentHits(tx, tz, ex, ez)) {
+        const yAt = ty + dy * len * hit.t;
+        const ground = this.heights.sample(hit.x, hit.z);
+        if (ground === null) continue;
+        if (yAt >= ground + hit.minHeight && yAt <= ground + hit.height) {
+          allowed = Math.min(allowed, hit.t * len - 0.3);
+          break; // hits are sorted; nearest blocking wall wins
+        }
+      }
+      return allowed;
+    },
+    sampleGround: (x, z) => this.heights.sample(x, z),
+  };
+
   dispose(): void {
     this.disposed = true;
     this.chunks.disposeAll();
     this.buildings.disposeAll();
+    this.avatar.dispose();
     this.sim?.dispose();
     this.sim = null;
   }
