@@ -21,6 +21,8 @@ interface HudState {
   vehicle: { speedKmh: number; name: string } | null;
   /** Interaction prompt ("Press E…"); empty when none. */
   toast: string;
+  /** Full-screen map overlay open. */
+  mapOpen: boolean;
 }
 
 /**
@@ -41,4 +43,5 @@ export const useHud = create<HudState>(() => ({
   simMs: 0,
   vehicle: null,
   toast: "",
+  mapOpen: false,
 }));

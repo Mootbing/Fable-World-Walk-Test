@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import StartOverlay from "./StartOverlay";
 import Hud from "./Hud";
 import Minimap from "./Minimap";
+import FullMap from "./FullMap";
 
 // All three.js code lives behind this boundary; ssr:false keeps it out of
 // the server bundle entirely (and is only legal inside a client component).
@@ -18,6 +19,7 @@ export default function ClientWorld() {
       <World />
       <Hud />
       <Minimap />
+      <FullMap />
       <StartOverlay />
     </div>
   );

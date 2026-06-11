@@ -230,6 +230,22 @@ impl Sim {
         self.roads.debug_segments()
     }
 
+    /// Shortest drivable route from the player to (x,z) as flat [x,z,...]
+    /// pairs; empty when no route exists in the loaded graph.
+    pub fn route_to(&self, x: f64, z: f64) -> Vec<f32> {
+        match self.roads.route(self.player.x, self.player.z, x, z) {
+            Some(points) => {
+                let mut out = Vec::with_capacity(points.len() * 2);
+                for (px, pz) in points {
+                    out.push(px as f32);
+                    out.push(pz as f32);
+                }
+                out
+            }
+            None => Vec::new(),
+        }
+    }
+
     /// Debug/test probe: resolve a circle against the collision world and
     /// return [resolved_x, resolved_z].
     pub fn resolve_probe(&self, x: f64, z: f64, r: f64) -> Vec<f64> {

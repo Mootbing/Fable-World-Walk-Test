@@ -6,8 +6,9 @@ import { CONFIG } from "@/engine/config";
 export default function StartOverlay() {
   const ready = useHud((s) => s.ready);
   const locked = useHud((s) => s.locked);
+  const mapOpen = useHud((s) => s.mapOpen);
 
-  if (locked) return null;
+  if (locked || mapOpen) return null;
 
   return (
     <div className="overlay">

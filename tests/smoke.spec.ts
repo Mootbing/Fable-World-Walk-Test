@@ -250,6 +250,39 @@ test("boots from fixtures, sim ticks, player walks", async ({ page }) => {
   });
   expect(radarPixels).toBeGreaterThan(800);
 
+  // PR14: GPS — set a waypoint 250m north, get an A* route on the real
+  // graph; magenta route renders on the radar; M toggles the full map.
+  const routePts = (await page.evaluate(() =>
+    window.__ww!.cmd("setWaypoint", 0, -250),
+  )) as number;
+  expect(routePts).toBeGreaterThan(4);
+  await page.waitForTimeout(300);
+  const magenta = await page.evaluate(() => {
+    const canvas = document.querySelector("canvas.minimap") as HTMLCanvasElement;
+    const data = canvas.getContext("2d")!.getImageData(0, 0, canvas.width, canvas.height).data;
+    let hits = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i] > 150 && data[i + 2] > 150 && data[i + 1] < 120) hits++;
+    }
+    return hits;
+  });
+  expect(magenta).toBeGreaterThan(20);
+  await page.evaluate(() => window.__ww!.press("KeyM", 80));
+  await page.waitForFunction(
+    () => (window.__ww!.query("hud") as { mapOpen: boolean }).mapOpen === true,
+    undefined,
+    { timeout: 3_000 },
+  );
+  await page.screenshot({ path: "test-results/fullmap.png" });
+  await page.evaluate(() => window.__ww!.press("KeyM", 80));
+  await page.waitForFunction(
+    () => (window.__ww!.query("hud") as { mapOpen: boolean }).mapOpen === false,
+    undefined,
+    { timeout: 3_000 },
+  );
+  await page.evaluate(() => window.__ww!.cmd("lock")); // headless: re-lock manually
+  await page.evaluate(() => window.__ww!.cmd("clearWaypoint"));
+
   // World actually meshed: 9 terrain chunks alone are ~295k triangles, and
   // Times Square building tiles add meshes on top.
   const render = (await page.evaluate(() => window.__ww!.query("render"))) as {
