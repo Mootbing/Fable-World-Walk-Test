@@ -31,6 +31,7 @@ pub const TYPE_VEHICLE: u32 = 2;
 
 pub const FLAG_GROUNDED: u32 = 1;
 pub const FLAG_IN_VEHICLE: u32 = 2;
+pub const FLAG_BRAKING: u32 = 4;
 
 /// How close the player must be to a vehicle to enter it (m).
 const ENTER_RANGE: f64 = 3.0;
@@ -431,6 +432,7 @@ impl Sim {
             (self.player.x, self.player.z),
             player_vehicle,
             &mut self.rng,
+            self.time,
             SUBSTEP,
         );
         self.resolve_player_vs_traffic();
@@ -623,7 +625,7 @@ impl Sim {
             e[11] = 1.0;
             e[12] = f32::from_bits(c.id);
             e[13] = f32::from_bits(TYPE_VEHICLE << 16 | c.kind << 8 | c.paint);
-            e[14] = f32::from_bits(0);
+            e[14] = f32::from_bits(if c.braking { FLAG_BRAKING } else { 0 });
         }
 
         self.entity_count = (1 + self.vehicles.len() + self.traffic.cars.len()

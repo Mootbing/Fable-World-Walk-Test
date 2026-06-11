@@ -36,6 +36,8 @@ export const ENTITY_TYPE = {
 export const STATE_FLAG = {
   grounded: 1,
   inVehicle: 2,
+  /** IDM decelerating hard (brake lights, PR29 visuals). */
+  braking: 4,
 } as const;
 
 /** Input button bitfield (mirrors sim/src/input.rs). */

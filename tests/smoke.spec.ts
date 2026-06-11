@@ -200,6 +200,12 @@ test("boots from fixtures, sim ticks, player walks", async ({ page }) => {
   expect(moved).toBeGreaterThan(3);
   await page.screenshot({ path: "test-results/traffic.png" });
 
+  // PR10: intersection arbitration is live — some car brakes for a line or
+  // leader within a few seconds of midtown traffic (FLAG_BRAKING lane bit).
+  await page.waitForFunction(() => window.__ww!.query("anyBraking") === true, undefined, {
+    timeout: 20_000,
+  });
+
   // World actually meshed: 9 terrain chunks alone are ~295k triangles, and
   // Times Square building tiles add meshes on top.
   const render = (await page.evaluate(() => window.__ww!.query("render"))) as {
