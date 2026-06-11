@@ -12,6 +12,7 @@ import { PlayerAvatar } from "./render/playerAvatar";
 import { VehiclePools } from "./render/vehiclePools";
 import { PedPools } from "./render/pedPools";
 import { PickupPools } from "./render/pickupPools";
+import { FxPools } from "./render/fx";
 import { KITS } from "./render/vehicleKits";
 import { RoadDebugOverlay } from "./render/roadDebugOverlay";
 import { extractRoadTile, RoadTile } from "./roads";
@@ -29,6 +30,8 @@ export interface MoveInput {
   horn: boolean;
   fire: boolean;
   aim: boolean;
+  reload: boolean;
+  switchWeapon: boolean;
   /** Camera yaw — melee/aim direction. */
   aimYaw: number;
   /** Raw -1..1 axes for vehicles (throttle / steering). */
@@ -72,6 +75,7 @@ export class WorldEngine {
   readonly vehiclePools = new VehiclePools();
   readonly pedPools = new PedPools();
   readonly pickupPools = new PickupPools();
+  readonly fx = new FxPools();
   readonly roadDebug = new RoadDebugOverlay();
   /** Per-tile road polylines (minimap + sim upload share this). */
   readonly roadTiles = new Map<string, RoadTile>();
@@ -127,6 +131,7 @@ export class WorldEngine {
       this.vehiclePools.group,
       this.pedPools.group,
       this.pickupPools.group,
+      this.fx.group,
     );
 
     // Every decoded heightfield mirrors into the sim (queued until boot).
@@ -243,7 +248,9 @@ export class WorldEngine {
         (input.enter ? BTN.enter : 0) |
         (input.horn ? BTN.horn : 0) |
         (input.fire ? BTN.fire : 0) |
-        (input.aim ? BTN.aim : 0);
+        (input.aim ? BTN.aim : 0) |
+        (input.reload ? BTN.reload : 0) |
+        (input.switchWeapon ? BTN.switchWeapon : 0);
       this.sim.setInput(
         buttons,
         input.moving ? input.dirX : 0,
@@ -271,10 +278,27 @@ export class WorldEngine {
 
       const events = this.sim.drainEvents();
       if (events.length > 0) {
+        for (let i = 0; i < events.length; i += 4) {
+          // Gunshots draw a tracer from the muzzle to the hit point.
+          if (events[i] === 14) {
+            const f32 = new Float32Array(
+              new Uint32Array([events[i + 2], events[i + 3]]).buffer,
+            );
+            this.fx.addTracer(
+              this.playerX,
+              this.playerY - 0.15,
+              this.playerZ,
+              f32[0],
+              this.playerY - 0.15,
+              f32[1],
+            );
+          }
+        }
         for (const word of events) this.eventLog.push(word);
         const excess = this.eventLog.length - EVENT_LOG_CAP * 4;
         if (excess > 0) this.eventLog.splice(0, excess);
       }
+      this.fx.update(dt);
     }
 
     this.diffTimer += dt;
@@ -333,6 +357,12 @@ export class WorldEngine {
           Math.floor(this.clockMinutes % 60),
         ).padStart(2, "0")}`,
         ...(this.sim ? this.sim.playerStats() : {}),
+        weapon: (() => {
+          if (!this.sim) return null;
+          const w = this.sim.weaponState();
+          if (w.equipped !== 1) return null;
+          return { name: "Pistol", clip: w.clip, reserve: w.reserve, reloading: w.reloading };
+        })(),
       });
       const area = resolveArea(this.placeTiles.values(), this.playerX, this.playerZ);
       if (area && area !== this.currentArea) {
@@ -421,6 +451,7 @@ export class WorldEngine {
     this.vehiclePools.dispose();
     this.pedPools.dispose();
     this.pickupPools.dispose();
+    this.fx.dispose();
     this.roadDebug.dispose();
     this.sim?.dispose();
     this.sim = null;

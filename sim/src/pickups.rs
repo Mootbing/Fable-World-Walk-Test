@@ -3,10 +3,13 @@
 
 use crate::events::{Events, EV_PICKUP};
 use crate::stats::PlayerStats;
+use crate::weapons::Weapons;
 
 pub const KIND_HEALTH: u32 = 0;
 pub const KIND_ARMOR: u32 = 1;
 pub const KIND_MONEY: u32 = 2;
+pub const KIND_PISTOL: u32 = 3;
+pub const KIND_AMMO: u32 = 4;
 
 const COLLECT_RADIUS: f64 = 1.3;
 
@@ -41,7 +44,14 @@ impl Pickups {
     }
 
     /// Collect anything in range of the (alive) player.
-    pub fn collect(&mut self, px: f64, pz: f64, stats: &mut PlayerStats, events: &mut Events) {
+    pub fn collect(
+        &mut self,
+        px: f64,
+        pz: f64,
+        stats: &mut PlayerStats,
+        weapons: &mut Weapons,
+        events: &mut Events,
+    ) {
         if stats.dead {
             return;
         }
@@ -53,6 +63,8 @@ impl Pickups {
                 match p.kind {
                     KIND_HEALTH => stats.heal(p.value),
                     KIND_ARMOR => stats.add_armor(p.value),
+                    KIND_PISTOL => weapons.give_pistol(p.value as u32),
+                    KIND_AMMO => weapons.reserve += p.value as u32,
                     _ => stats.add_money(p.value as i64),
                 }
                 events.push(EV_PICKUP, p.kind, (p.value as f32).to_bits(), 0);
@@ -77,7 +89,8 @@ mod tests {
         pk.spawn(0.0, 0.0, 0.0, KIND_HEALTH, 25.0);
         pk.spawn(0.5, 0.0, 0.5, KIND_MONEY, 80.0);
         pk.spawn(50.0, 0.0, 0.0, KIND_ARMOR, 50.0); // out of range
-        pk.collect(0.0, 0.0, &mut st, &mut ev);
+        let mut wp = Weapons::new();
+        pk.collect(0.0, 0.0, &mut st, &mut wp, &mut ev);
         assert_eq!(pk.count(), 1);
         assert!((st.health - 75.0).abs() < 1e-9);
         assert_eq!(st.money, crate::stats::START_MONEY + 80);

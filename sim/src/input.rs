@@ -12,6 +12,9 @@ pub const BTN_HORN: u32 = 1 << 7;
 pub const BTN_FIRE: u32 = 1 << 8;
 /// Aim (RMB) — PR18 ranged.
 pub const BTN_AIM: u32 = 1 << 9;
+pub const BTN_RELOAD: u32 = 1 << 10;
+/// Cycle weapon (Q).
+pub const BTN_SWITCH: u32 = 1 << 11;
 
 #[derive(Default)]
 pub struct Input {

@@ -24,6 +24,10 @@ pub const EV_PICKUP: u32 = 11;
 /// a = 1 hit / 0 whiff.
 pub const EV_PUNCH: u32 = 12;
 pub const EV_PED_KILLED: u32 = 13;
+/// a = hit kind (0 air, 1 building, 2 ped, 3 vehicle), b/c = hit x/z (f32).
+pub const EV_GUNSHOT: u32 = 14;
+pub const EV_RELOAD: u32 = 15;
+pub const EV_DRYFIRE: u32 = 16;
 
 pub const EVENT_WORDS: usize = 4;
 const MAX_EVENTS: usize = 256;

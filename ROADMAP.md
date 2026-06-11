@@ -179,9 +179,18 @@ Dev server runs on **port 3001** (3000 belongs to another app on this machine).
   mouse buttons in InputManager (RMB reserved for PR18 aim). Soft lock-on
   deferred to PR19. *Verified:* 56 Rust tests; smoke kills a ped by
   mouse-click swings and banks the drop.
-- [ ] **PR18 `feat: ranged combat v1 — pistol`** — weapon slots/ammo, RMB aim
-  cam + crosshair, hitscan raycast in Rust (buildings 2.5D + capsules),
-  tracer/muzzle/impact FX, reload, pickups.
+- [x] **PR18 `feat: ranged combat v1 — pistol`** — `weapons.rs` (fists ⇄
+  pistol via Q, clip 12 + reserve, R reload 1.4 s, auto-reload on dry
+  fire), RMB aim (tight 1.9 m shoulder cam) + LMB hitscan along camera
+  yaw: `CollisionWorld::raycast` (cell-walked segment vs footprint walls,
+  2.5D full-height for now) vs ped circles vs vehicle circles — nearest
+  wins; 2-tap ped kills, gunfire scatters within 16 m; pistol/ammo pickup
+  kinds (starter pistol 7 m west of spawn); additive fading tracers
+  (`fx.ts`) from EV_GUNSHOT hit points; HUD `Pistol · 12/24`. Smoke
+  hardening: button holds ≥900 ms + polled pixel checks (sub-frame
+  presses vanish at late-run fps), eager ped spawner. *Verified:* 58
+  Rust tests (fire/reload cycle, 2-tap kill, wall blocks the shot to the
+  ped behind it); smoke fires real aim+click events, clip drains.
 - [ ] **PR19 `feat: weapon wheel + arsenal (bat, SMG, shotgun)`** — hold-Tab
   radial wheel, spread/recoil/pellets per weapon.
 - [ ] **PR20 `feat: vehicle damage, fire, explosions`** — collision+bullet HP,

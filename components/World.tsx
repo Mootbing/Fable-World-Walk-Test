@@ -44,6 +44,8 @@ function Scene({
         horn: frame.horn,
         fire: frame.fire,
         aim: frame.aim,
+        reload: frame.reload,
+        switchWeapon: frame.switchWeapon,
         aimYaw: rig.yaw,
         forward: frame.forward,
         strafe: frame.strafe,
@@ -53,6 +55,7 @@ function Scene({
     );
 
     rig.driving = engine.driveState;
+    rig.aiming = frame.aim && !engine.driveState;
     engine.avatar.visible = rig.mode === "tp" && !engine.driveState;
     rig.apply(camera, engine.playerX, engine.playerY, engine.playerZ, engine.cameraClamp, dt);
     engine.camMode = rig.mode;
