@@ -106,8 +106,38 @@ export class SimBridge {
 
   // ---- per-frame ----
 
-  setInput(buttons: number, moveX: number, moveZ: number, aimYaw = 0, aimPitch = 0): void {
-    this.sim.set_input(buttons, moveX, moveZ, aimYaw, aimPitch);
+  setInput(
+    buttons: number,
+    moveX: number,
+    moveZ: number,
+    axisForward = 0,
+    axisStrafe = 0,
+    aimYaw = 0,
+    aimPitch = 0,
+  ): void {
+    this.sim.set_input(buttons, moveX, moveZ, axisForward, axisStrafe, aimYaw, aimPitch);
+  }
+
+  // ---- vehicles ----
+
+  spawnVehicle(x: number, z: number, yaw: number, kind = 0): number {
+    return this.sim.spawn_vehicle(x, z, yaw, kind);
+  }
+
+  driving(): boolean {
+    return this.sim.driving();
+  }
+
+  drivingSpeed(): number {
+    return this.sim.driving_speed();
+  }
+
+  drivingYaw(): number {
+    return this.sim.driving_yaw();
+  }
+
+  nearestVehicleDist(): number {
+    return this.sim.nearest_vehicle_dist();
   }
 
   step(dt: number): void {

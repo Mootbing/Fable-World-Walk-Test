@@ -17,6 +17,10 @@ interface HudState {
   /** Wasm sim heartbeat: substep counter and last step() cost. */
   simTick: number;
   simMs: number;
+  /** Non-null while driving. */
+  vehicle: { speedKmh: number } | null;
+  /** Interaction prompt ("Press E…"); empty when none. */
+  toast: string;
 }
 
 /**
@@ -35,4 +39,6 @@ export const useHud = create<HudState>(() => ({
   buildingsNote: "",
   simTick: 0,
   simMs: 0,
+  vehicle: null,
+  toast: "",
 }));

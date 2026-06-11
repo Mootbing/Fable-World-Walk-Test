@@ -7,6 +7,8 @@ export interface InputFrame {
   strafe: number;
   sprint: boolean;
   jump: boolean;
+  /** Enter/exit vehicle key held (the sim edge-detects). */
+  enter: boolean;
   /** Mouse deltas already scaled to radians. */
   yawDelta: number;
   pitchDelta: number;
@@ -83,6 +85,7 @@ export class InputManager {
       strafe: locked ? (k.KeyD || k.ArrowRight ? 1 : 0) - (k.KeyA || k.ArrowLeft ? 1 : 0) : 0,
       sprint: locked && !!(k.ShiftLeft || k.ShiftRight),
       jump: locked && !!k.Space,
+      enter: locked && !!k.KeyE,
       yawDelta: this.yawAcc,
       pitchDelta: this.pitchAcc,
       toggleCamera: this.toggleEdge,

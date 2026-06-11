@@ -62,11 +62,14 @@ Dev server runs on **port 3001** (3000 belongs to another app on this machine).
 
 ## Phase 2 — Driving
 
-- [ ] **PR6 `feat: arcade vehicle physics + first drivable car`** — bicycle
-  model w/ grip circle + handbrake (`sim/src/vehicle.rs`), E enter/exit with
-  exit-position validation, tp-drive chase cam (speed FOV), one procedural
-  sedan near spawn. *Accept:* drive a block, handbrake turn, crash into a
-  building and stop, exit.
+- [x] **PR6 `feat: arcade vehicle physics + first drivable car`** — bicycle
+  model with lateral-slip channel + handbrake drift (`sim/src/vehicle.rs`),
+  3-circle body collision with crash events, E enter/exit (door offsets
+  validated against collision), starter sedan spawns at world-open, chase
+  cam with auto-recenter + speed FOV, procedural sedan render (steering/
+  spinning wheels), speedometer + "Press E" toast. *Verified:* 26 Rust
+  tests (accel/brake/reverse, curve, handbrake slide, wall crash+stop,
+  enter/drive/exit round trip), smoke drives the car in-browser.
 - [ ] **PR7 `feat: vehicle variety + instanced entity renderer kit`** —
   archetype pools (sedan/hatch/van/taxi/police + shared wheel pool, palette
   via instanceColor, liveries); debug spawn row. *Accept:* 50 parked cars at

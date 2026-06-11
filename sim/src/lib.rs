@@ -8,12 +8,14 @@ pub mod input;
 pub mod player;
 pub mod rng;
 pub mod terrain;
+pub mod vehicle;
 
 use collision::{CollisionWorld, Footprint};
-use events::Events;
+use events::{Events, EV_VEHICLE_ENTER, EV_VEHICLE_EXIT};
 use input::Input;
 use player::Player;
 use terrain::HeightGrid;
+use vehicle::{DriveInput, Vehicle};
 use wasm_bindgen::prelude::*;
 
 /// f32 lanes per entity record. Layout (lanes 12..15 are u32 via to_bits):
@@ -23,8 +25,15 @@ pub const ENTITY_STRIDE: usize = 16;
 pub const MAX_ENTITIES: usize = 1024;
 
 pub const TYPE_PLAYER: u32 = 0;
+pub const TYPE_VEHICLE: u32 = 2;
 
 pub const FLAG_GROUNDED: u32 = 1;
+pub const FLAG_IN_VEHICLE: u32 = 2;
+
+/// How close the player must be to a vehicle to enter it (m).
+const ENTER_RANGE: f64 = 3.0;
+/// Door offsets tried on exit, in the vehicle frame (right, forward).
+const EXIT_OFFSETS: [(f64, f64); 3] = [(-1.7, 0.4), (1.7, 0.4), (0.0, -3.4)];
 
 const SUBSTEP: f64 = 1.0 / 60.0;
 const MAX_SUBSTEPS: u32 = 6;
@@ -43,6 +52,10 @@ pub struct Sim {
     heights: HeightGrid,
     collision: CollisionWorld,
     player: Player,
+    vehicles: Vec<Vehicle>,
+    /// Index into `vehicles` while the player is driving.
+    driving: Option<usize>,
+    next_vehicle_id: u32,
     events: Events,
     /// Preallocated at MAX_ENTITIES so the pointer never moves (no wasm
     /// memory growth from the entity buffer itself).
@@ -66,6 +79,9 @@ impl Sim {
             heights: HeightGrid::new(),
             collision: CollisionWorld::new(),
             player: Player::new(spawn_x, spawn_z),
+            vehicles: Vec::new(),
+            driving: None,
+            next_vehicle_id: 1,
             events: Events::new(),
             entities: vec![0.0; MAX_ENTITIES * ENTITY_STRIDE],
             entity_count: 1, // entity 0 is always the player
@@ -144,6 +160,10 @@ impl Sim {
 
     pub fn set_player_enabled(&mut self, enabled: bool) {
         self.player.enabled = enabled;
+        // The starter car: parked next to spawn the first time the world opens.
+        if enabled && self.vehicles.is_empty() {
+            self.spawn_vehicle(self.player.x + 10.0, self.player.z, 0.0, vehicle::KIND_SEDAN);
+        }
     }
 
     /// Horizontal correction writeback (JS-side building collision until the
@@ -151,7 +171,7 @@ impl Sim {
     pub fn set_player_pos(&mut self, x: f64, z: f64) {
         self.player.x = x;
         self.player.z = z;
-        self.write_player_record();
+        self.write_entities();
     }
 
     pub fn player_x(&self) -> f64 {
@@ -166,13 +186,55 @@ impl Sim {
         self.player.z
     }
 
+    // ---- vehicles ----
+
+    /// Spawn a vehicle; returns its id. Used by the starter car, debug
+    /// tooling, and (later) traffic/missions.
+    pub fn spawn_vehicle(&mut self, x: f64, z: f64, yaw: f64, kind: u32) -> u32 {
+        let id = self.next_vehicle_id;
+        self.next_vehicle_id += 1;
+        self.vehicles.push(Vehicle::new(id, kind, x, z, yaw));
+        id
+    }
+
+    pub fn driving(&self) -> bool {
+        self.driving.is_some()
+    }
+
+    /// Signed forward speed while driving, 0 on foot (for HUD/camera).
+    pub fn driving_speed(&self) -> f64 {
+        self.driving.map_or(0.0, |i| self.vehicles[i].v_long)
+    }
+
+    pub fn driving_yaw(&self) -> f64 {
+        self.driving.map_or(0.0, |i| self.vehicles[i].yaw)
+    }
+
+    /// Distance to the nearest enterable vehicle, or -1 (for the HUD toast).
+    pub fn nearest_vehicle_dist(&self) -> f64 {
+        self.nearest_vehicle()
+            .map_or(-1.0, |(_, d2)| d2.sqrt())
+    }
+
     // ---- per-frame ----
 
     /// move_x/move_z: world-space movement direction (normalized or zero).
-    pub fn set_input(&mut self, buttons: u32, move_x: f32, move_z: f32, aim_yaw: f32, aim_pitch: f32) {
+    /// axis_forward/axis_strafe: raw -1..1 input axes (throttle/steer).
+    pub fn set_input(
+        &mut self,
+        buttons: u32,
+        move_x: f32,
+        move_z: f32,
+        axis_forward: f32,
+        axis_strafe: f32,
+        aim_yaw: f32,
+        aim_pitch: f32,
+    ) {
         self.input.buttons = buttons;
         self.input.move_x = move_x;
         self.input.move_z = move_z;
+        self.input.axis_forward = axis_forward;
+        self.input.axis_strafe = axis_strafe;
         self.input.aim_yaw = aim_yaw;
         self.input.aim_pitch = aim_pitch;
     }
@@ -194,7 +256,7 @@ impl Sim {
             // Drop unpayable debt instead of spiraling.
             self.accumulator = 0.0;
         }
-        self.write_player_record();
+        self.write_entities();
     }
 
     pub fn tick(&self) -> f64 {
@@ -225,19 +287,12 @@ impl Sim {
 
     // ---- benchmark ----
 
-    /// Spawn n synthetic entities (after the player at index 0) that move
-    /// every substep, for measuring JS readback cost at scale.
+    /// Spawn n synthetic entities (slotted after the player and vehicles)
+    /// that move every substep, for measuring JS readback cost at scale.
     pub fn bench_spawn(&mut self, n: u32) {
-        let n = (n as usize).min(MAX_ENTITIES - 1);
+        let n = (n as usize).min(MAX_ENTITIES - 1 - self.vehicles.len());
         self.bench_count = n as u32;
-        self.entity_count = 1 + n as u32;
-        for i in 0..n {
-            let base = (1 + i) * ENTITY_STRIDE;
-            self.entities[base + 6] = 1.0; // identity quat w
-            self.entities[base + 11] = 1.0; // health
-            self.entities[base + 12] = f32::from_bits(i as u32 + 1); // id
-            self.entities[base + 13] = f32::from_bits(1 << 16); // type 1, variant 0
-        }
+        self.entity_count = (1 + self.vehicles.len() + n) as u32;
     }
 }
 
@@ -245,39 +300,149 @@ impl Sim {
     fn substep(&mut self) {
         self.tick += 1;
         self.time += SUBSTEP;
-        self.player.substep(
-            &self.input,
-            &self.heights,
-            &self.collision,
-            &mut self.events,
-            SUBSTEP,
-        );
+
+        // Enter/exit toggles on the E rising edge.
+        if self.player.enabled && self.input.pressed(input::BTN_ENTER) {
+            match self.driving {
+                Some(i) => self.exit_vehicle(i),
+                None => self.try_enter_vehicle(),
+            }
+        }
+
+        if let Some(i) = self.driving {
+            let drive = DriveInput {
+                throttle: self.input.axis_forward as f64,
+                steer: self.input.axis_strafe as f64,
+                handbrake: self.input.is_down(input::BTN_JUMP),
+            };
+            self.vehicles[i].substep(
+                Some(&drive),
+                &self.heights,
+                &self.collision,
+                &mut self.events,
+                SUBSTEP,
+            );
+            // Player rides along (seated eye a bit above the deck).
+            let v = &self.vehicles[i];
+            self.player.x = v.x;
+            self.player.z = v.z;
+            self.player.y = v.y + 1.3;
+            self.player.yaw = v.yaw;
+        } else {
+            self.player.substep(
+                &self.input,
+                &self.heights,
+                &self.collision,
+                &mut self.events,
+                SUBSTEP,
+            );
+        }
+
+        // Unoccupied vehicles still settle (ground follow, rolling out).
+        for i in 0..self.vehicles.len() {
+            if Some(i) == self.driving {
+                continue;
+            }
+            self.vehicles[i].substep(
+                None,
+                &self.heights,
+                &self.collision,
+                &mut self.events,
+                SUBSTEP,
+            );
+        }
+
         self.input.tick();
 
         let t = self.time as f32;
+        let bench_base = 1 + self.vehicles.len();
         for i in 0..self.bench_count as usize {
-            let base = (1 + i) * ENTITY_STRIDE;
+            let base = (bench_base + i) * ENTITY_STRIDE;
             let angle = t * 0.5 + i as f32 * 0.618;
             let radius = 10.0 + (i % 100) as f32;
             self.entities[base] = radius * angle.cos();
             self.entities[base + 2] = radius * angle.sin();
+            self.entities[base + 6] = 1.0; // identity quat w
             self.entities[base + 7] = radius * 0.5;
             self.entities[base + 8] = (t * 1.4 + i as f32 * 0.31).fract();
+            self.entities[base + 11] = 1.0;
+            self.entities[base + 12] = f32::from_bits(i as u32 + 1);
+            self.entities[base + 13] = f32::from_bits(1 << 16);
         }
     }
 
-    fn write_player_record(&mut self) {
-        let p = &self.player;
-        let speed = if self.input.move_len() > 1e-6 && p.enabled {
-            if self.input.is_down(input::BTN_SPRINT) {
-                player::SPRINT_SPEED
-            } else {
-                player::WALK_SPEED
+    fn nearest_vehicle(&self) -> Option<(usize, f64)> {
+        let mut best: Option<(usize, f64)> = None;
+        for (i, v) in self.vehicles.iter().enumerate() {
+            let dx = v.x - self.player.x;
+            let dz = v.z - self.player.z;
+            let d2 = dx * dx + dz * dz;
+            if best.is_none_or(|(_, b)| d2 < b) {
+                best = Some((i, d2));
             }
-        } else {
-            0.0
+        }
+        best
+    }
+
+    fn try_enter_vehicle(&mut self) {
+        let Some((i, d2)) = self.nearest_vehicle() else {
+            return;
         };
+        if d2.sqrt() > ENTER_RANGE {
+            return;
+        }
+        self.driving = Some(i);
+        self.events.push(EV_VEHICLE_ENTER, self.vehicles[i].id, 0, 0);
+    }
+
+    fn exit_vehicle(&mut self, i: usize) {
+        let v = &self.vehicles[i];
+        let (fx, fz) = v.forward();
+        let (rx, rz) = (-fz, fx);
+        let mut placed = (v.x + rx * EXIT_OFFSETS[0].0, v.z + rz * EXIT_OFFSETS[0].0);
+        for (r, f) in EXIT_OFFSETS {
+            let cand = (v.x + rx * r + fx * f, v.z + rz * r + fz * f);
+            let (ex, ez) = self.collision.resolve(cand.0, cand.1, player::RADIUS);
+            placed = (ex, ez);
+            if (ex - cand.0).abs() < 1e-9 && (ez - cand.1).abs() < 1e-9 {
+                break; // door side is free
+            }
+        }
+        let vy = v.y;
+        self.driving = None;
+        self.player.x = placed.0;
+        self.player.z = placed.1;
+        self.player.y = vy + player::EYE_HEIGHT;
+        self.player.grounded = true;
+        self.events.push(EV_VEHICLE_EXIT, self.vehicles[i].id, 0, 0);
+    }
+
+    fn write_entities(&mut self) {
+        // entity 0: the player
+        let driving = self.driving;
+        let speed = match driving {
+            Some(i) => self.vehicles[i].v_long,
+            None => {
+                if self.input.move_len() > 1e-6 && self.player.enabled {
+                    if self.input.is_down(input::BTN_SPRINT) {
+                        player::SPRINT_SPEED
+                    } else {
+                        player::WALK_SPEED
+                    }
+                } else {
+                    0.0
+                }
+            }
+        };
+        let p = &self.player;
         let half_yaw = (p.yaw / 2.0) as f32;
+        let mut flags = 0u32;
+        if p.grounded {
+            flags |= FLAG_GROUNDED;
+        }
+        if driving.is_some() {
+            flags |= FLAG_IN_VEHICLE;
+        }
         let e = &mut self.entities[0..ENTITY_STRIDE];
         e[0] = p.x as f32;
         e[1] = p.y as f32;
@@ -291,8 +456,48 @@ impl Sim {
         e[11] = 1.0;
         e[12] = f32::from_bits(0);
         e[13] = f32::from_bits(TYPE_PLAYER << 16);
-        e[14] = f32::from_bits(if p.grounded { FLAG_GROUNDED } else { 0 });
+        e[14] = f32::from_bits(flags);
+
+        // entities 1..: vehicles
+        for (slot, v) in self.vehicles.iter().enumerate() {
+            let base = (1 + slot) * ENTITY_STRIDE;
+            let q = quat_yxz(v.yaw, v.pitch, v.roll);
+            let e = &mut self.entities[base..base + ENTITY_STRIDE];
+            e[0] = v.x as f32;
+            e[1] = v.y as f32;
+            e[2] = v.z as f32;
+            e[3] = q[0];
+            e[4] = q[1];
+            e[5] = q[2];
+            e[6] = q[3];
+            e[7] = v.v_long as f32;
+            e[8] = v.wheel_spin as f32;
+            e[9] = v.steer as f32;
+            e[11] = 1.0;
+            e[12] = f32::from_bits(v.id);
+            e[13] = f32::from_bits(TYPE_VEHICLE << 16 | v.kind);
+            e[14] = f32::from_bits(if Some(slot) == driving { FLAG_IN_VEHICLE } else { 0 });
+        }
+
+        self.entity_count = (1 + self.vehicles.len() + self.bench_count as usize) as u32;
     }
+}
+
+/// Quaternion from YXZ euler (matches the three.js convention the renderer
+/// applies verbatim): q = qY(yaw) * qX(pitch) * qZ(roll).
+fn quat_yxz(yaw: f64, pitch: f64, roll: f64) -> [f32; 4] {
+    let (sy, cy) = ((yaw / 2.0).sin(), (yaw / 2.0).cos());
+    let (sx, cx) = ((pitch / 2.0).sin(), (pitch / 2.0).cos());
+    let (sz, cz) = ((roll / 2.0).sin(), (roll / 2.0).cos());
+    // qY * qX:
+    let (w1, x1, y1, z1) = (cy * cx, cy * sx, sy * cx, -sy * sx);
+    // (qY*qX) * qZ:
+    [
+        (x1 * cz + y1 * sz) as f32,
+        (y1 * cz - x1 * sz) as f32,
+        (z1 * cz + w1 * sz) as f32,
+        (w1 * cz - z1 * sz) as f32,
+    ]
 }
 
 #[cfg(test)]
@@ -333,7 +538,7 @@ mod tests {
         let y0 = sim.player_y();
         assert!((y0 - 21.7).abs() < 1e-3, "settled y {y0}");
 
-        sim.set_input(0, 0.0, -1.0, 0.0, 0.0); // walk north
+        sim.set_input(0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0); // walk north
         for _ in 0..60 {
             sim.step(SUBSTEP);
         }
@@ -351,14 +556,14 @@ mod tests {
         for _ in 0..120 {
             sim.step(SUBSTEP);
         }
-        sim.set_input(input::BTN_JUMP, 0.0, 0.0, 0.0, 0.0);
+        sim.set_input(input::BTN_JUMP, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
         sim.step(SUBSTEP);
         let evs: Vec<u32> = (0..sim.events_count() as usize * events::EVENT_WORDS)
             .map(|i| unsafe { *sim.events_ptr().add(i) })
             .collect();
         assert_eq!(evs[0], events::EV_JUMP);
         // release, fall, land
-        sim.set_input(0, 0.0, 0.0, 0.0, 0.0);
+        sim.set_input(0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
         let mut landed = false;
         for _ in 0..240 {
             sim.step(SUBSTEP);
@@ -373,6 +578,52 @@ mod tests {
             }
         }
         assert!(landed);
+    }
+
+    #[test]
+    fn enter_drive_exit_round_trip() {
+        let mut sim = Sim::new(1, 0.0, 0.0);
+        sim.load_heightfield(0, 0, -500.0, -500.0, 1000.0, &vec![0.0; FIELD_SIZE * FIELD_SIZE]);
+        sim.set_player_enabled(true); // spawns the starter car at (+10, 0)
+        for _ in 0..60 {
+            sim.step(SUBSTEP);
+        }
+        assert_eq!(sim.entity_count(), 2); // player + car
+        assert!(!sim.driving());
+
+        // Too far: E does nothing.
+        sim.set_input(input::BTN_ENTER, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+        sim.step(SUBSTEP);
+        assert!(!sim.driving());
+
+        // Walk into range and enter.
+        sim.set_player_pos(8.5, 0.0);
+        sim.set_input(0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+        sim.step(SUBSTEP);
+        sim.set_input(input::BTN_ENTER, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+        sim.step(SUBSTEP);
+        assert!(sim.driving(), "should have entered");
+
+        // Throttle for 3 seconds: car and player move together, fast.
+        sim.set_input(0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0);
+        for _ in 0..180 {
+            sim.step(SUBSTEP);
+        }
+        assert!(sim.driving_speed() > 12.0, "speed {}", sim.driving_speed());
+        assert!(sim.player_z() < -25.0, "drove north: {}", sim.player_z());
+
+        // Brake to a stop, then exit: player lands beside the car.
+        sim.set_input(0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0);
+        for _ in 0..240 {
+            sim.step(SUBSTEP);
+        }
+        sim.set_input(input::BTN_ENTER, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+        sim.step(SUBSTEP);
+        assert!(!sim.driving());
+        let evs: Vec<u32> = (0..sim.events_count() as usize * events::EVENT_WORDS)
+            .map(|i| unsafe { *sim.events_ptr().add(i) })
+            .collect();
+        assert!(evs.chunks(4).any(|e| e[0] == EV_VEHICLE_EXIT));
     }
 
     #[test]
