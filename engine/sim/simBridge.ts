@@ -83,6 +83,33 @@ export class SimBridge {
     this.sim.unload_tile_buildings(tx, ty);
   }
 
+  loadTileRoads(
+    tx: number,
+    ty: number,
+    coords: Float32Array,
+    lineOffsets: Uint32Array,
+    lineAttrs: Uint32Array,
+  ): void {
+    this.sim.load_tile_roads(tx, ty, coords, lineOffsets, lineAttrs);
+  }
+
+  unloadTileRoads(tx: number, ty: number): void {
+    this.sim.unload_tile_roads(tx, ty);
+  }
+
+  roadStats(): { edges: number; nodes: number; connectivity: number } {
+    return {
+      edges: this.sim.road_edge_count(),
+      nodes: this.sim.road_node_count(),
+      connectivity: this.sim.road_connectivity(),
+    };
+  }
+
+  /** Copy of the debug segment soup [x0,z0,x1,z1,...]. */
+  debugRoadGraph(): Float32Array {
+    return this.sim.debug_road_graph();
+  }
+
   /** Debug/test: circle pushed out of the wasm collision world. */
   resolveProbe(x: number, z: number, r: number): { x: number; z: number } {
     const out = this.sim.resolve_probe(x, z, r);

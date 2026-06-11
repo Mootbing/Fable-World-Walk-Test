@@ -14,6 +14,8 @@ export interface InputFrame {
   pitchDelta: number;
   /** Rising-edge of the camera toggle key (V). */
   toggleCamera: boolean;
+  /** Rising-edge of the road-graph debug overlay key (G). */
+  toggleRoadDebug: boolean;
 }
 
 const SENSITIVITY = 0.0022;
@@ -29,6 +31,7 @@ export class InputManager {
   private yawAcc = 0;
   private pitchAcc = 0;
   private toggleEdge = false;
+  private roadDebugEdge = false;
   private element: HTMLElement | null = null;
   private detachFns: (() => void)[] = [];
 
@@ -46,6 +49,7 @@ export class InputManager {
     on(window, "keydown", (e: KeyboardEvent) => {
       this.keys[e.code] = true;
       if (e.code === "KeyV" && !e.repeat && this.locked()) this.toggleEdge = true;
+      if (e.code === "KeyG" && !e.repeat && this.locked()) this.roadDebugEdge = true;
     });
     on(window, "keyup", (e: KeyboardEvent) => {
       this.keys[e.code] = false;
@@ -89,10 +93,12 @@ export class InputManager {
       yawDelta: this.yawAcc,
       pitchDelta: this.pitchAcc,
       toggleCamera: this.toggleEdge,
+      toggleRoadDebug: this.roadDebugEdge,
     };
     this.yawAcc = 0;
     this.pitchAcc = 0;
     this.toggleEdge = false;
+    this.roadDebugEdge = false;
     return frame;
   }
 }

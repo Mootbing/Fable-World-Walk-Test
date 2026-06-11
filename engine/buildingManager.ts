@@ -41,6 +41,9 @@ export class BuildingManager {
    */
   onTileBuildings: ((tx: number, ty: number, buildings: BuildingFeature[]) => void) | null = null;
   onTileBuildingsRemoved: ((tx: number, ty: number) => void) | null = null;
+  /** Raw fetched MVT bytes (roads + future layers live in the same tile). */
+  onTileData: ((tx: number, ty: number, buf: ArrayBuffer) => void) | null = null;
+  onTileDataRemoved: ((tx: number, ty: number) => void) | null = null;
 
   private tiles = new Map<string, BuildingTile>();
   private template: string | null = null;
@@ -163,6 +166,7 @@ export class BuildingManager {
       });
       return;
     }
+    this.onTileData?.(tx, ty, buf);
     try {
       tile.layer = parseBuildingLayer(buf);
     } catch (err) {
@@ -231,6 +235,7 @@ export class BuildingManager {
     this.tiles.delete(key);
     this.collision.removeTile(key);
     if (tile.state === "live") this.onTileBuildingsRemoved?.(tile.tx, tile.ty);
+    this.onTileDataRemoved?.(tile.tx, tile.ty);
     for (const g of tile.geometries) g.dispose();
     tile.geometries = [];
     if (tile.mesh) {

@@ -42,6 +42,7 @@ function Scene({
         enter: frame.enter,
         forward: frame.forward,
         strafe: frame.strafe,
+        toggleRoadDebug: frame.toggleRoadDebug,
       },
       dt,
     );

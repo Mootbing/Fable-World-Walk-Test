@@ -42,6 +42,10 @@ export function installTestHook(engine: WorldEngine): () => void {
           return engine.avatar.visible;
         case "driving":
           return engine.sim ? engine.sim.driving() : false;
+        case "roads":
+          return engine.sim ? engine.sim.roadStats() : null;
+        case "roadDebugInfo":
+          return { visible: engine.roadDebug.visible, vertices: engine.roadDebug.vertexCount };
         case "vehicles": {
           if (!engine.sim) return [];
           const f32 = engine.sim.entityView();
@@ -98,6 +102,9 @@ export function installTestHook(engine: WorldEngine): () => void {
           engine.sim?.setPlayerPos(x, z);
           return true;
         }
+        case "roadDebug":
+          engine.roadDebug.toggle();
+          return engine.roadDebug.visible;
         // Debug: spawn a grid of vehicles cycling through all kinds.
         case "spawnRow": {
           const [n] = args as [number];
