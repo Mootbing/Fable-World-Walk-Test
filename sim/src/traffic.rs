@@ -60,6 +60,8 @@ pub struct TrafficCar {
     pub husk: bool,
     /// Sim time when a husk should despawn.
     pub husk_until: f64,
+    /// Police pursuit: greedy routing toward the player, sirens on.
+    pub pursuit: bool,
 }
 
 pub struct Traffic {
@@ -104,6 +106,65 @@ impl Traffic {
         self.cars.swap_remove(index)
     }
 
+    pub fn pursuit_count(&self) -> u32 {
+        self.cars.iter().filter(|c| c.pursuit && !c.husk).count() as u32
+    }
+
+    /// Convert pursuit cars back to civilians... they just leave.
+    pub fn end_pursuits(&mut self) {
+        self.cars.retain(|c| !c.pursuit || c.husk);
+    }
+
+    /// Spawn a pursuit cruiser on a road edge near the player.
+    pub fn spawn_pursuit(&mut self, graph: &RoadGraph, player: (f64, f64), rng: &mut Pcg32) -> bool {
+        let total = graph.edges.len();
+        if total == 0 {
+            return false;
+        }
+        for _ in 0..40 {
+            let id = rng.next_below(total as u32) as usize;
+            let Some(edge) = graph.edges[id].as_ref() else { continue };
+            if edge.class == 6 || edge.len < 20.0 {
+                continue;
+            }
+            let mid = sample_polyline(&edge.points, edge.len * 0.5);
+            let d = ((mid.0 - player.0).powi(2) + (mid.1 - player.1).powi(2)).sqrt();
+            if !(60.0..=220.0).contains(&d) {
+                continue;
+            }
+            let s = edge.len * 0.5;
+            let (px, pz, tx, tz) = sample_polyline(&edge.points, s);
+            let (rx, rz) = (-tz, tx);
+            self.cars.push(TrafficCar {
+                id: self.next_id,
+                kind: 4, // police cruiser
+                paint: 0,
+                edge: id as u32,
+                s,
+                speed: edge.speed,
+                x: px + rx * LANE_OFFSET,
+                y: 0.0,
+                z: pz + rz * LANE_OFFSET,
+                yaw: (-tx).atan2(-tz),
+                steer: 0.0,
+                wheel_spin: 0.0,
+                next_edge: None,
+                smooth_ground: None,
+                prev_yaw: 0.0,
+                stopped_since: None,
+                creeping: false,
+                braking: false,
+                hp: 100.0,
+                husk: false,
+                husk_until: 0.0,
+                pursuit: true,
+            });
+            self.next_id += 1;
+            return true;
+        }
+        false
+    }
+
     /// Spawn a parked car off the graph at an exact spot (tests, setups).
     pub fn debug_spawn_at(&mut self, x: f64, z: f64, yaw: f64, kind: u32, paint: u32) -> u32 {
         let id = self.next_id;
@@ -130,6 +191,7 @@ impl Traffic {
             hp: 100.0,
             husk: false,
             husk_until: 0.0,
+            pursuit: false,
         });
         id
     }
@@ -182,7 +244,13 @@ impl Traffic {
             let Some(edge) = graph.edges.get(car.edge as usize).and_then(|e| e.as_ref()) else {
                 continue; // despawned below
             };
-            let v0 = if self.cars[i].creeping { CREEP_SPEED } else { edge.speed };
+            let v0 = if self.cars[i].creeping {
+                CREEP_SPEED
+            } else if self.cars[i].pursuit {
+                edge.speed * 1.5
+            } else {
+                edge.speed
+            };
             let v = self.cars[i].speed;
             // IDM acceleration.
             let accel = if let Some(gap) = gap {
@@ -248,10 +316,13 @@ impl Traffic {
                 }
                 // Transition to the chosen next edge.
                 let overflow = car.s - edge.len;
-                let next = car
-                    .next_edge
-                    .filter(|e| graph.edges.get(*e as usize).is_some_and(|x| x.is_some()))
-                    .or_else(|| pick_next_edge(graph, car.edge, rng));
+                let next = if car.pursuit {
+                    pick_pursuit_edge(graph, car.edge, player)
+                } else {
+                    car.next_edge
+                        .filter(|e| graph.edges.get(*e as usize).is_some_and(|x| x.is_some()))
+                        .or_else(|| pick_next_edge(graph, car.edge, rng))
+                };
                 match next {
                     Some(next_id) => {
                         let car = &mut self.cars[i];
@@ -566,6 +637,7 @@ impl Traffic {
                 hp: 100.0,
                 husk: false,
                 husk_until: 0.0,
+                pursuit: false,
             };
             self.next_id += 1;
             self.cars.push(car);
@@ -610,6 +682,26 @@ fn is_signaled(graph: &RoadGraph, node: &crate::roads::Node) -> bool {
 fn signal_phase(x: f64, z: f64, time: f64) -> u8 {
     let h = ((x * 73.856093).abs() + (z * 19.349663).abs()).fract();
     (((time / SIGNAL_CYCLE) + h * 2.0) as u64 % 2) as u8
+}
+
+/// Pursuit routing: at each node, take the out-edge whose far end is
+/// closest to the player (greedy beats A* at chase cadence and needs no
+/// stored route).
+fn pick_pursuit_edge(graph: &RoadGraph, edge_id: u32, player: (f64, f64)) -> Option<u32> {
+    let edge = graph.edges.get(edge_id as usize)?.as_ref()?;
+    let node = graph.nodes.get(edge.to as usize)?;
+    let mut best: Option<(u32, f64)> = None;
+    for out in &node.out {
+        let Some(next) = graph.edges.get(*out as usize).and_then(|e| e.as_ref()) else {
+            continue;
+        };
+        let end = &graph.nodes[next.to as usize];
+        let d2 = (end.x - player.0).powi(2) + (end.z - player.1).powi(2);
+        if best.is_none_or(|(_, b)| d2 < b) {
+            best = Some((*out, d2));
+        }
+    }
+    best.map(|(id, _)| id)
 }
 
 /// Choose the next directed edge at the end of `edge_id`: prefer straight,
@@ -769,6 +861,7 @@ mod tests {
                 hp: 100.0,
                 husk: false,
                 husk_until: 0.0,
+                pursuit: false,
             });
             t.next_id += 1;
         }
@@ -835,6 +928,7 @@ mod tests {
             hp: 100.0,
             husk: false,
             husk_until: 0.0,
+            pursuit: false,
         });
         t.next_id += 1;
         t.cars.len() - 1
@@ -1060,6 +1154,7 @@ mod tests {
             hp: 100.0,
             husk: false,
             husk_until: 0.0,
+            pursuit: false,
         });
         // Park the player's car 25m ahead in the same lane.
         let (qx, qz, _, _) = sample_polyline(&g.edges[edge_id as usize].as_ref().unwrap().points, 35.0);

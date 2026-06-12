@@ -22,6 +22,8 @@ export default function Hud() {
   const money = useHud((s) => s.money);
   const dead = useHud((s) => s.dead);
   const weapon = useHud((s) => s.weapon);
+  const wanted = useHud((s) => s.wanted);
+  const busted = useHud((s) => s.busted);
 
   return (
     <>
@@ -52,6 +54,16 @@ export default function Hud() {
         </div>
       )}
       {dead && <div className="wasted">WASTED</div>}
+      {busted && <div className="wasted busted">BUSTED</div>}
+      {locked && wanted > 0 && (
+        <div className="stars">
+          {Array.from({ length: 6 }, (_, i) => (
+            <span key={i} className={i < wanted ? "star on" : "star"}>
+              ★
+            </span>
+          ))}
+        </div>
+      )}
       {locked && vehicle && (
         <div className="speedo">
           <span className="speedo-name">{vehicle.name}</span>

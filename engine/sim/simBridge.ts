@@ -210,6 +210,22 @@ export class SimBridge {
     return this.sim.debug_spawn_traffic(x, z, yaw, kind);
   }
 
+  wantedLevel(): number {
+    return this.sim.wanted_level();
+  }
+
+  wantedEvading(): boolean {
+    return this.sim.wanted_evading();
+  }
+
+  isBusted(): boolean {
+    return this.sim.is_busted();
+  }
+
+  addHeat(amount: number): void {
+    this.sim.add_heat(amount);
+  }
+
   weaponsOwned(): number {
     return this.sim.weapons_owned();
   }

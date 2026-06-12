@@ -13,6 +13,7 @@ pub mod roads;
 pub mod stats;
 pub mod terrain;
 pub mod traffic;
+pub mod wanted;
 pub mod weapons;
 pub mod vehicle;
 
@@ -43,6 +44,7 @@ pub const FLAG_DOWN: u32 = 16;
 pub const FLAG_SMOKING: u32 = 32;
 pub const FLAG_BURNING: u32 = 64;
 pub const FLAG_HUSK: u32 = 128;
+pub const FLAG_SIREN: u32 = 256;
 
 /// How close the player must be to a vehicle to enter it (m).
 const ENTER_RANGE: f64 = 3.0;
@@ -81,6 +83,8 @@ pub struct Sim {
     punch_cooldown: f64,
     punch_anim: f64,
     weapons: weapons::Weapons,
+    wanted: wanted::Wanted,
+    force_timer: f64,
     events: Events,
     /// Preallocated at MAX_ENTITIES so the pointer never moves (no wasm
     /// memory growth from the entity buffer itself).
@@ -118,6 +122,8 @@ impl Sim {
             punch_cooldown: 0.0,
             punch_anim: 0.0,
             weapons: weapons::Weapons::new(),
+            wanted: wanted::Wanted::new(),
+            force_timer: 0.0,
             events: Events::new(),
             entities: vec![0.0; MAX_ENTITIES * ENTITY_STRIDE],
             entity_count: 1, // entity 0 is always the player
@@ -370,6 +376,23 @@ impl Sim {
     }
 
     /// Bitmask of owned weapon slots (wheel UI).
+    pub fn wanted_level(&self) -> u32 {
+        self.wanted.level
+    }
+
+    pub fn wanted_evading(&self) -> bool {
+        self.wanted.evading
+    }
+
+    pub fn is_busted(&self) -> bool {
+        self.wanted.busted
+    }
+
+    /// Debug/test/missions: pour on heat directly.
+    pub fn add_heat(&mut self, amount: f64) {
+        self.wanted.add_heat(amount, &mut self.events);
+    }
+
     pub fn weapons_owned(&self) -> u32 {
         self.weapons.owned_mask()
     }
@@ -520,6 +543,9 @@ impl Sim {
                 self.player.x = self.spawn_x;
                 self.player.z = self.spawn_z;
                 self.player.grounded = true;
+                self.wanted.clear(&mut self.events);
+                self.peds.dismiss_cops(self.time);
+                self.traffic.end_pursuits();
             }
             self.input.tick();
             return;
@@ -593,8 +619,10 @@ impl Sim {
                 Some((killed, hx, hz)) => {
                     self.events.push(EV_PUNCH, 1, 0, 0);
                     self.peds.scatter((self.player.x, self.player.z), 11.0, self.time + 5.0);
+                    self.wanted.add_heat(6.0, &mut self.events);
                     if killed {
                         self.events.push(EV_PED_KILLED, 0, 0, 0);
+                        self.wanted.add_heat(25.0, &mut self.events);
                         let drop = 10 + self.rng.next_below(40) as i64;
                         let y = self.heights.sample(hx, hz).unwrap_or(0.0);
                         self.pickups.spawn(hx, y, hz, pickups::KIND_MONEY, drop as f64);
@@ -689,10 +717,15 @@ impl Sim {
             &self.heights,
             &self.collision,
             (self.player.x, self.player.z),
+            self.driving.is_some(),
+            &mut self.stats,
+            &mut self.events,
             &mut self.rng,
             self.time,
             SUBSTEP,
         );
+
+        self.update_wanted();
 
         // Horn scatters the sidewalk; bull-bar contact knocks peds down.
         if let Some(vi) = self.driving {
@@ -707,6 +740,7 @@ impl Sim {
             };
             for (_, _, impact) in self.peds.vehicle_hits(vx, vz, vyaw, hl, vspeed, self.time) {
                 self.events.push(EV_PED_HIT, (impact as f32).to_bits(), 0, 0);
+                self.wanted.add_heat(12.0, &mut self.events);
             }
         }
 
@@ -779,6 +813,78 @@ impl Sim {
                 }
             }
         }
+    }
+
+    /// Police response: evasion/busted tracking and force maintenance.
+    fn update_wanted(&mut self) {
+        // Busted hold → release at the precinct.
+        if self.wanted.busted {
+            self.wanted.busted_hold -= SUBSTEP;
+            if self.wanted.busted_hold <= 0.0 {
+                self.driving = None;
+                self.player.x = self.spawn_x + 45.0;
+                self.player.z = self.spawn_z + 45.0;
+                self.player.grounded = true;
+                self.weapons = weapons::Weapons::new();
+                self.stats.add_money(-wanted::BUSTED_FINE);
+                self.stats.health = stats::MAX_HEALTH;
+                self.wanted.busted = false;
+                self.wanted.clear(&mut self.events);
+                self.peds.dismiss_cops(self.time);
+                self.traffic.end_pursuits();
+            }
+            return;
+        }
+
+        let seen = self
+            .peds
+            .any_cop_sees(&self.collision, self.player.x, self.player.z);
+        let adjacent = self.driving.is_none()
+            && self.player_speed_slow()
+            && self.peds.any_cop_adjacent(self.player.x, self.player.z);
+        self.wanted.tick(seen, adjacent, SUBSTEP, &mut self.events);
+
+        if self.wanted.level == 0 {
+            if self.peds.cop_count() != (0, 0) {
+                self.peds.dismiss_cops(self.time);
+            }
+            if self.traffic.pursuit_count() > 0 {
+                self.traffic.end_pursuits();
+            }
+            return;
+        }
+
+        // Maintain the response force at a gentle cadence.
+        self.force_timer += SUBSTEP;
+        if self.force_timer >= 1.5 {
+            self.force_timer = 0.0;
+            let (want_unarmed, want_armed, want_cars) = self.wanted.force_for_level();
+            let (have_unarmed, have_armed) = self.peds.cop_count();
+            for _ in have_unarmed..want_unarmed {
+                self.spawn_cop_near(false);
+            }
+            for _ in have_armed..want_armed {
+                self.spawn_cop_near(true);
+            }
+            if self.traffic.pursuit_count() < want_cars {
+                self.traffic
+                    .spawn_pursuit(&self.roads, (self.player.x, self.player.z), &mut self.rng);
+            }
+        }
+    }
+
+    fn player_speed_slow(&self) -> bool {
+        // On foot the sim is positional; treat "not actively moving" as slow.
+        self.input.move_len() < 0.1
+    }
+
+    fn spawn_cop_near(&mut self, armed: bool) {
+        let angle = self.rng.next_f32() as f64 * std::f64::consts::TAU;
+        let dist = 25.0 + self.rng.next_f32() as f64 * 30.0;
+        let x = self.player.x + angle.cos() * dist;
+        let z = self.player.z + angle.sin() * dist;
+        let (rx, rz) = self.collision.resolve(x, z, 0.4);
+        self.peds.spawn_cop(rx, rz, armed);
     }
 
     /// Fire/explosion staging: burning vehicles drain, dead ones detonate
@@ -860,6 +966,7 @@ impl Sim {
             }
         }
         self.peds.scatter((x, z), 30.0, self.time + 6.0);
+        self.wanted.add_heat(25.0, &mut self.events);
     }
 
     /// Hitscan along the camera yaw: nearest of building wall, ped, or
@@ -930,11 +1037,19 @@ impl Sim {
                 }
             }
             if let Some(i) = ped_idx {
+                let was_cop = self.peds.peds[i].cop;
                 if self.peds.apply_damage(i, s.damage, (ox, oz), self.time) {
                     self.events.push(EV_PED_KILLED, 0, 0, 0);
-                    let drop = 10 + self.rng.next_below(40) as i64;
-                    let y = self.heights.sample(hx, hz).unwrap_or(0.0);
-                    self.pickups.spawn(hx, y, hz, pickups::KIND_MONEY, drop as f64);
+                    self.wanted
+                        .add_heat(if was_cop { 40.0 } else { 25.0 }, &mut self.events);
+                    if !was_cop {
+                        let drop = 10 + self.rng.next_below(40) as i64;
+                        let y = self.heights.sample(hx, hz).unwrap_or(0.0);
+                        self.pickups.spawn(hx, y, hz, pickups::KIND_MONEY, drop as f64);
+                    }
+                } else {
+                    self.wanted
+                        .add_heat(if was_cop { 10.0 } else { 3.0 }, &mut self.events);
                 }
             }
             any_loud = true;
@@ -1004,6 +1119,7 @@ impl Sim {
         self.vehicles.push(v);
         self.driving = Some(self.vehicles.len() - 1);
         self.events.push(EV_CARJACK, id, 0, 0);
+        self.wanted.add_heat(15.0, &mut self.events);
         self.events.push(EV_VEHICLE_ENTER, id, 0, 0);
     }
 
@@ -1123,6 +1239,9 @@ impl Sim {
             e[12] = f32::from_bits(c.id);
             e[13] = f32::from_bits(TYPE_VEHICLE << 16 | c.kind << 8 | c.paint);
             let mut cf = if c.braking { FLAG_BRAKING } else { 0 };
+            if c.pursuit {
+                cf |= FLAG_SIREN;
+            }
             if c.husk {
                 cf |= FLAG_HUSK;
             } else if c.hp <= 25.0 {
@@ -1157,7 +1276,7 @@ impl Sim {
             let pf = match p.state {
                 peds::PedState::Fleeing { .. } => FLAG_GROUNDED | FLAG_FLEEING,
                 peds::PedState::Down { .. } => FLAG_DOWN,
-                peds::PedState::Walking => FLAG_GROUNDED,
+                peds::PedState::Walking | peds::PedState::Chasing => FLAG_GROUNDED,
             };
             e[14] = f32::from_bits(pf);
         }
@@ -1381,6 +1500,80 @@ mod tests {
     }
 
     #[test]
+    fn wanted_cops_chase_hurt_and_bust() {
+        let mut sim = Sim::new(1, 0.0, 0.0);
+        sim.load_heightfield(0, 0, -500.0, -500.0, 1000.0, &vec![0.0; FIELD_SIZE * FIELD_SIZE]);
+        sim.set_player_enabled(true);
+        sim.add_heat(12.0); // 1 star: unarmed beat cops
+        let mut cop_close = false;
+        for _ in 0..(30 * 60) {
+            sim.step(SUBSTEP);
+            if sim
+                .peds
+                .peds
+                .iter()
+                .any(|p| p.cop && ((p.x - sim.player_x()).powi(2) + (p.z - sim.player_z()).powi(2)).sqrt() < 3.0)
+            {
+                cop_close = true;
+                break;
+            }
+        }
+        assert!(cop_close, "no cop ever reached the player");
+        // Standing still in their grip: busted, fined, disarmed, moved.
+        let money0 = sim.player_money() as i64;
+        sim.give_weapon(weapons::WEAPON_PISTOL, 12);
+        let mut busted_seen = false;
+        for _ in 0..(20 * 60) {
+            sim.step(SUBSTEP);
+            if sim.is_busted() {
+                busted_seen = true;
+            }
+            if busted_seen && !sim.is_busted() {
+                break; // released at the precinct
+            }
+        }
+        assert!(busted_seen, "never got busted while standing in the grab");
+        assert_eq!(sim.wanted_level(), 0);
+        assert_eq!(sim.weapon_equipped(), weapons::WEAPON_FIST);
+        assert!(sim.weapons_owned() == 1, "iron confiscated");
+        assert_eq!(sim.player_money() as i64, money0 - wanted::BUSTED_FINE);
+        assert!((sim.player_x() - 45.0).abs() < 1.0, "released at the precinct offset");
+    }
+
+    #[test]
+    fn armed_response_shoots_and_evasion_clears() {
+        let mut sim = Sim::new(1, 0.0, 0.0);
+        sim.load_heightfield(0, 0, -500.0, -500.0, 1000.0, &vec![0.0; FIELD_SIZE * FIELD_SIZE]);
+        sim.set_player_enabled(true);
+        sim.add_heat(45.0); // 2 stars: armed cops
+        assert_eq!(sim.wanted_level(), 2);
+        let mut hurt = false;
+        for _ in 0..(25 * 60) {
+            // Keep moving a little so the busted path can't trigger.
+            sim.set_input(0, 0.7, -0.7, 0.0, 0.0, 0.0, 0.0);
+            sim.step(SUBSTEP);
+            if sim.player_health() < 99.0 {
+                hurt = true;
+                break;
+            }
+        }
+        assert!(hurt, "armed cops never landed a shot");
+
+        // Teleport far away: out of sight long enough clears the stars.
+        sim.set_input(0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+        sim.set_player_pos(400.0, 400.0);
+        let mut cleared = false;
+        for _ in 0..(25 * 60) {
+            sim.step(SUBSTEP);
+            if sim.wanted_level() == 0 {
+                cleared = true;
+                break;
+            }
+        }
+        assert!(cleared, "evasion never cleared the stars");
+    }
+
+    #[test]
     fn shooting_a_car_explodes_and_chains() {
         let mut sim = Sim::new(1, 0.0, 0.0);
         sim.load_heightfield(0, 0, -500.0, -500.0, 1000.0, &vec![0.0; FIELD_SIZE * FIELD_SIZE]);
@@ -1389,7 +1582,7 @@ mod tests {
         // Two parked cars side by side, a bystander next to them, player 20m south.
         sim.debug_spawn_traffic(0.0, -20.0, 0.0, 0);
         sim.debug_spawn_traffic(3.2, -20.0, 0.0, 0);
-        sim.debug_spawn_ped(-3.0, -20.0);
+        let bystander = sim.debug_spawn_ped(-3.0, -20.0);
         for _ in 0..30 {
             sim.step(SUBSTEP);
         }
@@ -1416,8 +1609,16 @@ mod tests {
         }
         assert!(explosions >= 2, "chain never propagated ({explosions} blasts)");
         // Both cars are husks; the bystander died in the blast.
-        assert!(sim.traffic.cars.iter().all(|c| c.husk));
-        assert!(sim.peds.peds.iter().all(|p| p.dead || p.id >= 2_000_002));
+        assert!(sim.traffic.cars.iter().all(|c| c.husk || c.pursuit));
+        // The bystander died in the blast (cops may have spawned since —
+        // explosions draw heat now).
+        assert!(sim
+            .peds
+            .peds
+            .iter()
+            .find(|p| p.id == bystander)
+            .is_none_or(|p| p.dead));
+        assert!(sim.wanted_level() >= 1, "explosions should draw heat");
         // Player at 20m was outside the radius.
         assert!(!sim.player_dead());
     }

@@ -44,6 +44,10 @@ export function installTestHook(engine: WorldEngine): () => void {
           return engine.sim ? engine.sim.driving() : false;
         case "weapon":
           return engine.sim ? engine.sim.weaponState() : null;
+        case "wanted":
+          return engine.sim ? engine.sim.wantedLevel() : 0;
+        case "evading":
+          return engine.sim ? engine.sim.wantedEvading() : false;
         case "stats":
           return engine.sim ? engine.sim.playerStats() : null;
         case "gps":
@@ -57,6 +61,16 @@ export function installTestHook(engine: WorldEngine): () => void {
           return engine.sim ? engine.sim.trafficCount() : 0;
         case "peds":
           return engine.sim ? engine.sim.pedCount() : 0;
+        case "cops": {
+          if (!engine.sim) return 0;
+          const u32 = engine.sim.entityViewU32();
+          let n = 0;
+          for (let base = 0; base < u32.length; base += 16) {
+            const tv = u32[base + 13];
+            if (tv >>> 16 === 1 && (tv & 0xffff) === 100) n++;
+          }
+          return n;
+        }
         case "anyBraking": {
           if (!engine.sim) return false;
           const u32 = engine.sim.entityViewU32();
@@ -142,6 +156,11 @@ export function installTestHook(engine: WorldEngine): () => void {
         case "equip": {
           const [id] = args as [number];
           engine.sim?.equipWeapon(id);
+          return true;
+        }
+        case "heat": {
+          const [n] = args as [number];
+          engine.sim?.addHeat(n);
           return true;
         }
         case "damage": {

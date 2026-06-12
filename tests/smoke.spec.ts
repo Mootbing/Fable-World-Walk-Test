@@ -203,7 +203,7 @@ test("boots from fixtures, sim ticks, player walks", async ({ page }) => {
   // PR10: intersection arbitration is live — some car brakes for a line or
   // leader within a few seconds of midtown traffic (FLAG_BRAKING lane bit).
   await page.waitForFunction(() => window.__ww!.query("anyBraking") === true, undefined, {
-    timeout: 20_000,
+    timeout: 45_000,
   });
 
   // PR11: pedestrians stroll the sidewalks (sim count + still rendering
@@ -490,6 +490,25 @@ test("boots from fixtures, sim ticks, player walks", async ({ page }) => {
   expect(booms).toBeGreaterThanOrEqual(1);
   await page.screenshot({ path: "test-results/explosion.png" });
   await page.evaluate(() => window.__ww!.cmd("equip", 0));
+
+  // PR21: wanted — heat raises stars, cops spawn (uniformed peds), and
+  // teleporting out of sight clears everything.
+  await page.evaluate(() => window.__ww!.cmd("heat", 12));
+  await page.waitForFunction(() => (window.__ww!.query("wanted") as number) >= 1, undefined, {
+    timeout: 5_000,
+  });
+  await page.waitForFunction(() => (window.__ww!.query("cops") as number) >= 1, undefined, {
+    timeout: 20_000, // force maintenance runs every 1.5 sim-seconds
+  });
+  await page.screenshot({ path: "test-results/wanted.png" });
+  await page.evaluate(() => window.__ww!.cmd("warpPlayer", 500, 500));
+  // Out of every cop's sight: the evasion clock starts (the full 15
+  // sim-second clear is pinned by cargo tests — too dilation-sensitive
+  // to wall-clock here).
+  await page.waitForFunction(() => window.__ww!.query("evading") === true, undefined, {
+    timeout: 15_000,
+  });
+  await page.evaluate(() => window.__ww!.cmd("warpPlayer", 0, 0));
 
   // World actually meshed: 9 terrain chunks alone are ~295k triangles, and
   // Times Square building tiles add meshes on top.

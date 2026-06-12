@@ -354,3 +354,21 @@ body {
   color: #93a7bd;
   margin-bottom: 2px;
 }
+
+.stars {
+  position: fixed;
+  right: 28px;
+  top: 92px;
+  font-size: 20px;
+  letter-spacing: 3px;
+  pointer-events: none;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.7);
+}
+
+.star { color: rgba(180, 195, 212, 0.25); }
+.star.on { color: #e8edf4; }
+
+.wasted.busted {
+  color: #3f6fb5;
+  background: rgba(4, 6, 10, 0.55);
+}

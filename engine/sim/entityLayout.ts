@@ -44,6 +44,7 @@ export const STATE_FLAG = {
   smoking: 32,
   burning: 64,
   husk: 128,
+  siren: 256,
 } as const;
 
 /** Input button bitfield (mirrors sim/src/input.rs). */
@@ -79,5 +80,7 @@ export const EVENT = {
   reload: 15,
   dryfire: 16,
   explosion: 17,
+  wantedChanged: 18,
+  busted: 19,
 } as const;
 export const EVENT_WORDS = 4;
