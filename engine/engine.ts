@@ -24,6 +24,7 @@ import { Shops } from "@/game/shops";
 import { computeDayState, createDayState } from "./render/dayNight";
 import { WeatherFx } from "./render/weatherFx";
 import { AudioEngine } from "./audio";
+import { getSettings, updateSettings } from "./settings";
 import { MISSIONS } from "@/game/missions";
 import { useHud } from "./store";
 
@@ -103,6 +104,7 @@ export class WorldEngine {
   readonly weatherFx = new WeatherFx();
   readonly audio = new AudioEngine();
   private thunderPending = false;
+  private radioHeld = false;
   /** Fog near/far multiplier from weather (World.tsx applies it). */
   fogScale = 1;
   /** Lightning flash 0..1, decays fast; whitens the sky in storms. */
@@ -339,7 +341,16 @@ export class WorldEngine {
       this.dayState.sky.lerp(FLASH_WHITE, this.flash * 0.8);
       this.dayState.dirIntensity += this.flash * 1.6;
     }
-    if (!this.audio.unlocked && useHud.getState().locked) this.audio.unlock();
+    if (!this.audio.unlocked && useHud.getState().locked) {
+      this.audio.unlock();
+      this.audio.station = getSettings().radioStation % 4;
+    }
+    if (this.driveState && input.reload && !this.radioHeld) {
+      const station = this.audio.nextStation();
+      updateSettings({ radioStation: station });
+      useHud.setState({ missionFlash: `📻 ${this.audio.stationName}` });
+    }
+    this.radioHeld = input.reload;
     this.audio.update({
       driving: this.driveState !== null,
       speed: this.sim?.drivingSpeed() ?? 0,

@@ -3,6 +3,8 @@
 export interface Settings {
   sensitivity: number;
   invertY: boolean;
+  /** 0 = radio off, 1..N = station index. */
+  radioStation: number;
 }
 
 const KEY = "worldwalk-settings";
@@ -13,13 +15,13 @@ export function getSettings(): Settings {
   try {
     const raw = localStorage.getItem(KEY);
     if (raw) {
-      cached = { sensitivity: 1, invertY: false, ...JSON.parse(raw) } as Settings;
+      cached = { sensitivity: 1, invertY: false, radioStation: 0, ...JSON.parse(raw) } as Settings;
       return cached;
     }
   } catch {
     // fall through to defaults
   }
-  cached = { sensitivity: 1, invertY: false };
+  cached = { sensitivity: 1, invertY: false, radioStation: 0 };
   return cached;
 }
 

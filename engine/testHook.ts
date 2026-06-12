@@ -46,6 +46,8 @@ export function installTestHook(engine: WorldEngine): () => void {
           return engine.sim ? engine.sim.driving() : false;
         case "weapon":
           return engine.sim ? engine.sim.weaponState() : null;
+        case "radio":
+          return { station: engine.audio.station, name: engine.audio.stationName };
         case "audio":
           return {
             state: engine.audio.ctxState,
@@ -217,6 +219,8 @@ export function installTestHook(engine: WorldEngine): () => void {
           engine.sim?.equipWeapon(id);
           return true;
         }
+        case "radio":
+          return engine.audio.nextStation();
         case "setWeather":
           engine.sim?.setWeather(args[0] as number);
           return true;
