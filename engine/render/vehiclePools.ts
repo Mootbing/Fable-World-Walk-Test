@@ -50,11 +50,17 @@ class Pool {
 
 export class VehiclePools {
   readonly group = new THREE.Group();
+  /** Set by the engine from the day/night factor. */
+  night = false;
+  /** Lamp instances drawn last frame (test observability). */
+  lampCount = 0;
 
   private bodies: Pool[] = [];
   private cabins: Pool[] = [];
   private wheels: Pool;
   private toppers: Pool;
+  private headLamps: Pool;
+  private tailLamps: Pool;
 
   private white = new THREE.MeshLambertMaterial({ color: 0xffffff });
   private glass = new THREE.MeshLambertMaterial({ color: 0x20242c });
@@ -94,7 +100,20 @@ export class VehiclePools {
     const topperGeo = new THREE.BoxGeometry(0.65, 0.16, 0.32);
     this.toppers = new Pool(topperGeo, this.white, CAPACITY);
 
-    this.group.add(this.wheels.mesh, this.toppers.mesh);
+    // Unlit lamp dots read as head/taillights at night.
+    const lampGeo = new THREE.BoxGeometry(0.22, 0.12, 0.06);
+    this.headLamps = new Pool(
+      lampGeo,
+      new THREE.MeshBasicMaterial({ color: 0xfff2c4 }),
+      CAPACITY * 2,
+    );
+    this.tailLamps = new Pool(
+      lampGeo,
+      new THREE.MeshBasicMaterial({ color: 0xe03028 }),
+      CAPACITY * 2,
+    );
+
+    this.group.add(this.wheels.mesh, this.toppers.mesh, this.headLamps.mesh, this.tailLamps.mesh);
   }
 
   update(f32: Float32Array, u32: Uint32Array): void {
@@ -102,6 +121,8 @@ export class VehiclePools {
     for (const p of this.cabins) p.begin();
     this.wheels.begin();
     this.toppers.begin();
+    this.headLamps.begin();
+    this.tailLamps.begin();
 
     const count = f32.length / ENTITY_STRIDE;
     for (let i = 0; i < count; i++) {
@@ -145,6 +166,22 @@ export class VehiclePools {
         this.wheels.push(this.local);
       }
 
+      if (this.night && !husk) {
+        const lampY = WHEEL_RADIUS + kit.bodyH - 0.12;
+        const halfL = kit.length / 2;
+        for (const sx of [kit.width / 2 - 0.22, -(kit.width / 2 - 0.22)]) {
+          this.wheelPos.set(sx, lampY, -halfL - 0.02);
+          this.wheelQuat.identity();
+          this.local.compose(this.wheelPos, this.wheelQuat, this.one);
+          this.local.premultiply(this.m);
+          this.headLamps.push(this.local);
+          this.wheelPos.set(sx, lampY, halfL + 0.02);
+          this.local.compose(this.wheelPos, this.wheelQuat, this.one);
+          this.local.premultiply(this.m);
+          this.tailLamps.push(this.local);
+        }
+      }
+
       if (kit.topper !== null) {
         this.wheelPos.set(0, WHEEL_RADIUS + kit.bodyH + kit.cabinH + 0.03, kit.cabinZ);
         this.wheelQuat.identity();
@@ -157,12 +194,24 @@ export class VehiclePools {
 
     for (const p of this.bodies) p.end();
     for (const p of this.cabins) p.end();
+    this.headLamps.end();
+    this.tailLamps.end();
+    this.lampCount = this.headLamps.cursor + this.tailLamps.cursor;
     this.wheels.end();
     this.toppers.end();
   }
 
   dispose(): void {
-    for (const p of [...this.bodies, ...this.cabins, this.wheels, this.toppers]) p.dispose();
+    for (const p of [
+      ...this.bodies,
+      ...this.cabins,
+      this.wheels,
+      this.toppers,
+      this.headLamps,
+      this.tailLamps,
+    ]) {
+      p.dispose();
+    }
     this.white.dispose();
     this.glass.dispose();
     this.tire.dispose();

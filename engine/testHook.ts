@@ -46,6 +46,12 @@ export function installTestHook(engine: WorldEngine): () => void {
           return engine.sim ? engine.sim.driving() : false;
         case "weapon":
           return engine.sim ? engine.sim.weaponState() : null;
+        case "daylight":
+          return {
+            factor: engine.dayState.daylight,
+            lamps: engine.vehiclePools.lampCount,
+            windowOpacity: engine.windowGlowOpacity,
+          };
         case "packages": {
           if (!engine.sim) return null;
           return {
@@ -196,6 +202,9 @@ export function installTestHook(engine: WorldEngine): () => void {
           engine.sim?.equipWeapon(id);
           return true;
         }
+        case "setClock":
+          engine.clockMinutes = args[0] as number;
+          return true;
         case "spawnPoi":
           engine.injectPoi(args[0] as number, args[1] as number, args[2] as number);
           return true;

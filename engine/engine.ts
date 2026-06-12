@@ -21,6 +21,7 @@ import type { CameraClamp } from "./render/cameraRig";
 import { MissionRuntime } from "@/game/missionRuntime";
 import { Activities } from "@/game/activities";
 import { Shops } from "@/game/shops";
+import { computeDayState, createDayState } from "./render/dayNight";
 import { MISSIONS } from "@/game/missions";
 import { useHud } from "./store";
 
@@ -92,6 +93,11 @@ export class WorldEngine {
   private currentArea = "";
   /** Game clock in minutes since midnight (1 real second = 1 game minute). */
   clockMinutes = 12 * 60;
+  /** Clock-driven lighting state; World.tsx applies it to the scene. */
+  readonly dayState = createDayState();
+  /** Current lit-window opacity (observability for tests). */
+  windowGlowOpacity = 0;
+  private headlight = new THREE.SpotLight(0xfff1cf, 0, 70, 0.42, 0.45, 1.2);
   /** Renderer-reported camera state, for HUD/tests/minimap. */
   camMode: "fp" | "tp" = "fp";
   camPos = { x: 0, y: 0, z: 0 };
@@ -235,6 +241,8 @@ export class WorldEngine {
       }),
     );
     this.marker.visible = false;
+    this.headlight.visible = false;
+    this.group.add(this.headlight, this.headlight.target);
     this.group.add(this.marker);
 
     this.group.add(this.roadDebug.group);
@@ -300,6 +308,23 @@ export class WorldEngine {
     if (this.disposed) return;
     this.elapsed += dt;
     this.clockMinutes = (this.clockMinutes + dt) % 1440;
+    computeDayState(this.clockMinutes, this.dayState);
+    const night = this.dayState.daylight < 0.35;
+    this.vehiclePools.night = night;
+    this.windowGlowOpacity = Math.max(0, 1 - this.dayState.daylight * 2.2) * 0.95;
+    this.buildings.windowMaterial.opacity = this.windowGlowOpacity;
+    if (night && this.driveState) {
+      const fx = -Math.sin(this.camYaw);
+      const fz = -Math.cos(this.camYaw);
+      this.headlight.visible = true;
+      this.headlight.intensity = 5;
+      this.headlight.position.set(this.playerX + fx * 2.2, this.playerY + 0.6, this.playerZ + fz * 2.2);
+      this.headlight.target.position.set(this.playerX + fx * 32, this.playerY - 1.2, this.playerZ + fz * 32);
+      this.headlight.target.updateMatrixWorld();
+    } else {
+      this.headlight.visible = false;
+      this.headlight.intensity = 0;
+    }
 
     if (this.sim) {
       const buttons =

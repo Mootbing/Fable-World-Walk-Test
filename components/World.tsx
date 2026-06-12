@@ -21,6 +21,9 @@ function Scene({
 }) {
   const camera = useThree((s) => s.camera) as THREE.PerspectiveCamera;
   const gl = useThree((s) => s.gl);
+  const scene = useThree((s) => s.scene);
+  const hemiRef = useRef<THREE.HemisphereLight>(null);
+  const dirRef = useRef<THREE.DirectionalLight>(null);
 
   useEffect(() => {
     input.attach(gl.domElement);
@@ -63,9 +66,26 @@ function Scene({
     engine.camMode = rig.mode;
     engine.camPos = { x: camera.position.x, y: camera.position.y, z: camera.position.z };
     engine.camYaw = rig.yaw;
+
+    // Clock-driven lighting (engine.dayState is recomputed in update()).
+    const ds = engine.dayState;
+    if (scene.background instanceof THREE.Color) scene.background.copy(ds.sky);
+    if (scene.fog) scene.fog.color.copy(ds.sky);
+    if (hemiRef.current) hemiRef.current.intensity = ds.hemiIntensity;
+    if (dirRef.current) {
+      dirRef.current.intensity = ds.dirIntensity;
+      dirRef.current.color.copy(ds.dirColor);
+      dirRef.current.position.copy(ds.sunPos);
+    }
   });
 
-  return <primitive object={engine.group} />;
+  return (
+    <>
+      <hemisphereLight ref={hemiRef} args={["#ffffff", "#8e8678", 1.15]} />
+      <directionalLight ref={dirRef} position={[350, 700, 420]} intensity={1.3} />
+      <primitive object={engine.group} />
+    </>
+  );
 }
 
 export default function World() {
@@ -101,8 +121,6 @@ export default function World() {
     >
       <color attach="background" args={[CONFIG.skyColor]} />
       <fog attach="fog" args={[CONFIG.skyColor, CONFIG.fogNear, CONFIG.fogFar]} />
-      <hemisphereLight args={["#ffffff", "#8e8678", 1.15]} />
-      <directionalLight position={[350, 700, 420]} intensity={1.3} />
       <Scene engine={engine} input={inputRef.current} rig={rigRef.current} />
     </Canvas>
   );

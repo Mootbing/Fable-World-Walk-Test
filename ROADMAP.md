@@ -276,7 +276,7 @@ Dev server runs on **port 3001** (3000 belongs to another app on this machine).
 
 ## Phase 6 — Atmosphere & polish
 
-- [ ] **PR29 `feat: day/night cycle + headlights + lit windows`** — clock-driven
+- [x] **PR29 `feat: day/night cycle + headlights + lit windows`** — clock-driven
   sun/sky/fog, emissive window cells, head/taillights, player spotlight cones.
 - [ ] **PR30 `feat: weather system`** — Markov states, rain particles + grip
   multiplier, fog, lightning.

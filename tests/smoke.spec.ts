@@ -825,6 +825,32 @@ test("boots from fixtures, sim ticks, player walks", async ({ page }) => {
     timeout: 5_000,
   });
 
+  // PR29: day/night — the clock drives daylight, lamps, window glow.
+  await page.evaluate(() => window.__ww!.cmd("setClock", 12 * 60)); // noon
+  await page.waitForFunction(
+    () => {
+      const d = window.__ww!.query("daylight") as { factor: number; lamps: number };
+      return d.factor > 0.85 && d.lamps === 0;
+    },
+    undefined,
+    { timeout: 5_000 },
+  );
+  await page.evaluate(() => window.__ww!.cmd("setClock", 60)); // 01:00
+  await page.waitForFunction(
+    () => {
+      const d = window.__ww!.query("daylight") as {
+        factor: number;
+        lamps: number;
+        windowOpacity: number;
+      };
+      return d.factor < 0.15 && d.lamps > 0 && d.windowOpacity > 0.4;
+    },
+    undefined,
+    { timeout: 5_000 },
+  );
+  await page.screenshot({ path: "test-results/night.png" });
+  await page.evaluate(() => window.__ww!.cmd("setClock", 12 * 60)); // back to noon
+
   // World actually meshed: 9 terrain chunks alone are ~295k triangles, and
   // Times Square building tiles add meshes on top.
   const render = (await page.evaluate(() => window.__ww!.query("render"))) as {
