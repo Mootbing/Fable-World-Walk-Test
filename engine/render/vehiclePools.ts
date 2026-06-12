@@ -61,6 +61,7 @@ export class VehiclePools {
   private toppers: Pool;
   private headLamps: Pool;
   private tailLamps: Pool;
+  private rotors: Pool;
 
   private white = new THREE.MeshLambertMaterial({ color: 0xffffff });
   private glass = new THREE.MeshLambertMaterial({ color: 0x20242c });
@@ -113,7 +114,16 @@ export class VehiclePools {
       CAPACITY * 2,
     );
 
-    this.group.add(this.wheels.mesh, this.toppers.mesh, this.headLamps.mesh, this.tailLamps.mesh);
+    const rotorGeo = new THREE.BoxGeometry(4.6, 0.05, 0.26);
+    this.rotors = new Pool(rotorGeo, new THREE.MeshLambertMaterial({ color: 0x23262b }), 16);
+
+    this.group.add(
+      this.wheels.mesh,
+      this.toppers.mesh,
+      this.headLamps.mesh,
+      this.tailLamps.mesh,
+      this.rotors.mesh,
+    );
   }
 
   update(f32: Float32Array, u32: Uint32Array): void {
@@ -123,6 +133,7 @@ export class VehiclePools {
     this.toppers.begin();
     this.headLamps.begin();
     this.tailLamps.begin();
+    this.rotors.begin();
 
     const count = f32.length / ENTITY_STRIDE;
     for (let i = 0; i < count; i++) {
@@ -192,6 +203,15 @@ export class VehiclePools {
         }
       }
 
+      if (kind === 8) {
+        // Main rotor spins on the anim lane.
+        this.wheelPos.set(0, WHEEL_RADIUS + kit.bodyH + 0.32, 0);
+        this.wheelQuat.setFromAxisAngle(this.yAxis, spin * 3.0);
+        this.local.compose(this.wheelPos, this.wheelQuat, this.one);
+        this.local.premultiply(this.m);
+        this.rotors.push(this.local);
+      }
+
       if (kit.topper !== null) {
         this.wheelPos.set(0, WHEEL_RADIUS + kit.bodyH + kit.cabinH + 0.03, kit.cabinZ);
         this.wheelQuat.identity();
@@ -206,6 +226,7 @@ export class VehiclePools {
     for (const p of this.cabins) p.end();
     this.headLamps.end();
     this.tailLamps.end();
+    this.rotors.end();
     this.lampCount = this.headLamps.cursor + this.tailLamps.cursor;
     this.wheels.end();
     this.toppers.end();
@@ -219,6 +240,7 @@ export class VehiclePools {
       this.toppers,
       this.headLamps,
       this.tailLamps,
+      this.rotors,
     ]) {
       p.dispose();
     }

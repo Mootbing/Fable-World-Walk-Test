@@ -90,6 +90,8 @@ pub struct Sim {
     /// (kind, x, z) per tile: 0 hospital, 1 police (respawn anchors).
     pois: std::collections::HashMap<(i32, i32), Vec<(u32, f64, f64)>>,
     water: water::Water,
+    /// 5-6 star air unit: (x, y, z, yaw, rotor spin).
+    police_heli: Option<(f64, f64, f64, f64, f64)>,
     /// Hidden packages: lifetime found count and collected stable ids.
     packages_found: u32,
     packages_spawned: u32,
@@ -148,6 +150,7 @@ impl Sim {
             roadblock_timer: 0.0,
             pois: std::collections::HashMap::new(),
             water: water::Water::new(),
+            police_heli: None,
             packages_found: 0,
             packages_spawned: 0,
             packages_collected: std::collections::HashSet::new(),
@@ -201,6 +204,7 @@ impl Sim {
         coords: &[f32],
         ring_offsets: &[u32],
         feat_offsets: &[u32],
+        tops: &[f32],
     ) {
         let mut footprints = Vec::new();
         if feat_offsets.len() >= 2 {
@@ -216,7 +220,8 @@ impl Sim {
                         .collect();
                     rings.push(ring);
                 }
-                footprints.push(Footprint { rings });
+                let top = tops.get(f).copied().unwrap_or(f32::MAX) as f64;
+                footprints.push(Footprint { rings, top });
             }
         }
         self.collision.add_tile((tx, ty), footprints);
@@ -446,6 +451,10 @@ impl Sim {
             return 0;
         }
         self.spawn_vehicle(x, z, 0.0, vehicle::KIND_BOAT)
+    }
+
+    pub fn police_heli_active(&self) -> bool {
+        self.police_heli.is_some()
     }
 
     pub fn poi_count(&self) -> u32 {
@@ -1040,6 +1049,9 @@ impl Sim {
         }
 
         if let Some(i) = self.driving {
+            if self.vehicles[i].kind == vehicle::KIND_HELI {
+                self.heli_substep(i, SUBSTEP);
+            } else {
             let drive = DriveInput {
                 throttle: self.input.axis_forward as f64,
                 steer: self.input.axis_strafe as f64,
@@ -1054,6 +1066,7 @@ impl Sim {
                 wet_grip,
                 SUBSTEP,
             );
+            }
             // Player rides along (seated eye a bit above the deck).
             let v = &self.vehicles[i];
             let moved = ((v.x - self.player.x).powi(2) + (v.z - self.player.z).powi(2)).sqrt();
@@ -1111,6 +1124,7 @@ impl Sim {
         }
 
         self.tick_weather();
+        self.tick_police_heli(SUBSTEP);
         self.update_vehicle_damage();
 
         for (kind, value) in self.pickups.collect(
@@ -1581,6 +1595,76 @@ impl Sim {
         self.punch_anim = 1.0; // arm-extend pose doubles as recoil
     }
 
+    /// Player-flown helicopter: collective on jump/sprint, yaw on the
+    /// strafe axis, pitch-forward thrust, prism collision only below the
+    /// roofline of each building.
+    fn heli_substep(&mut self, i: usize, dt: f64) {
+        let climb = (self.input.is_down(input::BTN_JUMP) as i32
+            - self.input.is_down(input::BTN_SPRINT) as i32) as f64;
+        let throttle = self.input.axis_forward as f64;
+        let yaw_in = self.input.axis_strafe as f64;
+        let ground = {
+            let v = &self.vehicles[i];
+            self.heights.sample(v.x, v.z).unwrap_or(0.0)
+        };
+        let v = &mut self.vehicles[i];
+        v.v_vert += (climb * 9.0 - v.v_vert * 1.8) * dt;
+        v.y = (v.y + v.v_vert * dt).clamp(ground + 0.45, ground + 170.0);
+        let airborne = v.y > ground + 1.2;
+
+        v.yaw -= yaw_in * 1.25 * dt;
+        let s = vehicle::spec(v.kind);
+        v.v_long += (throttle * s.accel - v.v_long * 0.45) * dt;
+        v.v_long = v.v_long.clamp(-s.max_reverse, s.max_speed);
+        if !airborne {
+            v.v_long *= 1.0 - (3.0 * dt).min(0.9); // skids drag on the deck
+        }
+        let (fx, fz) = v.forward();
+        let nx = v.x + fx * v.v_long * dt;
+        let nz = v.z + fz * v.v_long * dt;
+        let (px, pz) = self.collision.resolve_below(nx, nz, 1.7, v.y);
+        if (px - nx).abs() > 1e-9 || (pz - nz).abs() > 1e-9 {
+            v.v_long *= 0.5; // rotor clips the facade
+        }
+        v.x = px;
+        v.z = pz;
+        // Attitude reads the stick; rotor spin rides the anim lane.
+        v.pitch += (v.v_long / s.max_speed * 0.32 - v.pitch) * (dt * 5.0).min(1.0);
+        v.roll += (yaw_in * 0.22 - v.roll) * (dt * 5.0).min(1.0);
+        v.wheel_spin += dt * (28.0 + v.v_vert.abs() * 2.0);
+
+        self.player.x = v.x;
+        self.player.z = v.z;
+        self.player.y = v.y + 1.1;
+        self.player.yaw = v.yaw;
+    }
+
+    /// 5-6 star air support: a kinematic chaser that shadows the player.
+    fn tick_police_heli(&mut self, dt: f64) {
+        if self.wanted.level < 5 {
+            self.police_heli = None;
+            return;
+        }
+        let (px, pz) = (self.player.x, self.player.z);
+        let ground = self.heights.sample(px, pz).unwrap_or(0.0);
+        let target_y = ground + 52.0;
+        let heli = self.police_heli.get_or_insert_with(|| {
+            let ang = self.rng.next_below(628) as f64 / 100.0;
+            (px + ang.cos() * 140.0, target_y + 25.0, pz + ang.sin() * 140.0, 0.0, 0.0)
+        });
+        let (hx, hy, hz, _yaw, spin) = *heli;
+        let dx = px - hx;
+        let dz = pz - hz;
+        let d = (dx * dx + dz * dz).sqrt().max(1e-6);
+        // Close to ~30m and hold an orbit-ish offset.
+        let speed = if d > 30.0 { 26.0 } else { 6.0 };
+        let nx = hx + dx / d * speed * dt;
+        let nz = hz + dz / d * speed * dt;
+        let ny = hy + (target_y - hy).clamp(-12.0 * dt, 12.0 * dt);
+        let nyaw = dx.atan2(dz) + std::f64::consts::PI;
+        *heli = (nx, ny, nz, nyaw, spin + dt * 30.0);
+    }
+
     fn nearest_vehicle(&self) -> Option<(usize, f64)> {
         let mut best: Option<(usize, f64)> = None;
         for (i, v) in self.vehicles.iter().enumerate() {
@@ -1818,9 +1902,31 @@ impl Sim {
             e[14] = f32::from_bits(0);
         }
 
+        // Air unit rides the same vehicle record path (siren flag = blip).
+        let mut extra = 0usize;
+        if let Some((hx, hy, hz, hyaw, spin)) = self.police_heli {
+            let slot = pickup_base + self.pickups.items.len();
+            let base = slot * ENTITY_STRIDE;
+            if base + ENTITY_STRIDE <= self.entities.len() {
+                let q = quat_yxz(hyaw, 0.0, 0.0);
+                let e = &mut self.entities[base..base + ENTITY_STRIDE];
+                e[0] = hx as f32;
+                e[1] = hy as f32;
+                e[2] = hz as f32;
+                e[3..7].copy_from_slice(&q);
+                e[7] = spin as f32;
+                e[11] = 1.0;
+                e[12] = f32::from_bits(4_000_000);
+                e[13] = f32::from_bits(TYPE_VEHICLE << 16 | vehicle::KIND_HELI << 8);
+                e[14] = f32::from_bits(256); // siren
+                extra = 1;
+            }
+        }
+
         self.entity_count = (1 + self.vehicles.len() + self.traffic.cars.len()
             + self.peds.count() as usize
             + self.pickups.count() as usize
+            + extra
             + self.bench_count as usize)
             .min(MAX_ENTITIES) as u32;
     }
@@ -2054,6 +2160,78 @@ mod tests {
             .find(|p| p.id == victim)
             .is_none_or(|p| p.dead);
         assert!(dead, "victim should be dead after three post-respawn punches");
+    }
+
+    #[test]
+    fn heli_flies_clears_rooftops_and_lands() {
+        let mut sim = Sim::new(5, 0.0, 0.0);
+        sim.load_heightfield(0, 0, -500.0, -500.0, 1000.0, &vec![0.0; FIELD_SIZE * FIELD_SIZE]);
+        // A 30m-tall slab directly north of the pad.
+        sim.load_tile_buildings(
+            0,
+            0,
+            &[-20.0, -40.0, 20.0, -40.0, 20.0, -60.0, -20.0, -60.0],
+            &[0, 4],
+            &[0, 1],
+            &[30.0],
+        );
+        sim.set_player_enabled(true);
+        for _ in 0..120 {
+            sim.step(SUBSTEP);
+        }
+        let heli = sim.spawn_vehicle(2.5, 0.0, 0.0, vehicle::KIND_HELI);
+        assert!(heli > 0);
+        sim.set_input(input::BTN_ENTER, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+        sim.step(SUBSTEP);
+        assert!(sim.driving());
+
+        // Collective up: climb past the roofline.
+        sim.set_input(input::BTN_JUMP, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+        for _ in 0..(8 * 60) {
+            sim.step(SUBSTEP);
+        }
+        let alt = sim.player_y();
+        assert!(alt > 35.0, "climbed to {alt:.1}m");
+
+        // Fly north over the slab, level: no pushout at altitude.
+        sim.set_input(0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0);
+        for _ in 0..(6 * 60) {
+            sim.step(SUBSTEP);
+        }
+        assert!(sim.player_z() < -60.0, "crossed the building, z={:.1}", sim.player_z());
+
+        // Settle: collective down all the way to the deck.
+        sim.set_input(input::BTN_SPRINT, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+        for _ in 0..(12 * 60) {
+            sim.step(SUBSTEP);
+        }
+        assert!(sim.player_y() < 3.5, "landed, y={:.1}", sim.player_y());
+
+        // At street level the same slab is solid.
+        sim.set_input(0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+        let (cx, cz) = (0.0, -50.0);
+        let (rx, rz) = sim.collision.resolve_below(cx, cz, 1.7, 2.0);
+        assert!((rx - cx).abs() > 1e-6 || (rz - cz).abs() > 1e-6, "wall at street level");
+        let (hx2, hz2) = sim.collision.resolve_below(cx, cz, 1.7, 40.0);
+        assert!((hx2 - cx).abs() < 1e-9 && (hz2 - cz).abs() < 1e-9, "clear above the roof");
+    }
+
+    #[test]
+    fn five_and_six_stars_bring_air_support() {
+        let mut sim = Sim::new(5, 0.0, 0.0);
+        sim.load_heightfield(0, 0, -500.0, -500.0, 1000.0, &vec![0.0; FIELD_SIZE * FIELD_SIZE]);
+        sim.set_player_enabled(true);
+        sim.add_heat(250.0);
+        assert_eq!(sim.wanted_level(), 5);
+        for _ in 0..60 {
+            sim.step(SUBSTEP);
+        }
+        assert!(sim.police_heli_active(), "air unit on station at 5 stars");
+        sim.add_heat(200.0);
+        assert_eq!(sim.wanted_level(), 6);
+        sim.clear_wanted();
+        sim.step(SUBSTEP);
+        assert!(!sim.police_heli_active(), "air unit leaves with the heat");
     }
 
     #[test]
@@ -2537,8 +2715,7 @@ mod tests {
             5,
             &[-12.0, -30.0, -2.0, -30.0, -2.0, -29.0, -12.0, -29.0, -12.0, -30.0],
             &[0, 5],
-            &[0, 1],
-        );
+            &[0, 1], &[]);
 
         let victim_dead = |sim: &Sim| {
             sim.peds
@@ -2720,3 +2897,4 @@ mod tests {
         assert!(a.entities[base].abs() > 0.1 || a.entities[base + 2].abs() > 0.1);
     }
 }
+

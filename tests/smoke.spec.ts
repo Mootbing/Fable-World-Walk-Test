@@ -1055,6 +1055,78 @@ test("boots from fixtures, sim ticks, player walks", async ({ page }) => {
     timeout: 8_000,
   });
 
+  // PR36: helicopters — collective climbs, lands, and 5 stars scrambles
+  // the air unit.
+  const p36 = (await page.evaluate(() => window.__ww!.query("player"))) as {
+    x: number;
+    z: number;
+    y: number;
+  };
+  await page.evaluate(
+    ([x, z]) => window.__ww!.cmd("warpPlayer", x, z),
+    [p36.x + 70, p36.z] as [number, number],
+  );
+  await page.evaluate(
+    ([x, z]) => window.__ww!.cmd("spawnTraffic", x + 72.2, z, 8),
+    [p36.x, p36.z] as [number, number],
+  );
+  await page.evaluate(() => window.__ww!.press("KeyE", 250));
+  await page.waitForFunction(() => window.__ww!.query("driving") === true, undefined, {
+    timeout: 5_000,
+  });
+  expect(await page.evaluate(() => window.__ww!.query("drivingKind"))).toBe(8);
+  const ground36 = ((await page.evaluate(() => window.__ww!.query("player"))) as { y: number })
+    .y;
+  let climbed = 0;
+  for (let i = 0; i < 6 && climbed < 6; i++) {
+    await page.evaluate(() =>
+      window.dispatchEvent(new KeyboardEvent("keydown", { code: "Space", bubbles: true })),
+    );
+    await page.waitForTimeout(1100);
+    await page.evaluate(() =>
+      window.dispatchEvent(new KeyboardEvent("keyup", { code: "Space", bubbles: true })),
+    );
+    climbed =
+      ((await page.evaluate(() => window.__ww!.query("player"))) as { y: number }).y - ground36;
+  }
+  expect(climbed).toBeGreaterThan(6);
+  await page.screenshot({ path: "test-results/heli.png" });
+  // Air support at 5 stars while we hover.
+  await page.evaluate(() => window.__ww!.cmd("heat", 260));
+  await page.waitForFunction(
+    () =>
+      (window.__ww!.query("wanted") as number) >= 5 &&
+      (window.__ww!.query("policeHeli") as boolean) === true,
+    undefined,
+    { timeout: 8_000 },
+  );
+  await page.evaluate(() => window.__ww!.cmd("clearWanted"));
+  await page.waitForFunction(
+    () => (window.__ww!.query("policeHeli") as boolean) === false,
+    undefined,
+    { timeout: 5_000 },
+  );
+  // Set it down and step off.
+  let down36 = climbed;
+  for (let i = 0; i < 8 && down36 > 2; i++) {
+    await page.evaluate(() =>
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", { code: "ShiftLeft", bubbles: true }),
+      ),
+    );
+    await page.waitForTimeout(1100);
+    await page.evaluate(() =>
+      window.dispatchEvent(new KeyboardEvent("keyup", { code: "ShiftLeft", bubbles: true })),
+    );
+    down36 =
+      ((await page.evaluate(() => window.__ww!.query("player"))) as { y: number }).y - ground36;
+  }
+  expect(down36).toBeLessThanOrEqual(2);
+  await page.evaluate(() => window.__ww!.press("KeyE", 250));
+  await page.waitForFunction(() => window.__ww!.query("driving") === false, undefined, {
+    timeout: 5_000,
+  });
+
   // World actually meshed: 9 terrain chunks alone are ~295k triangles, and
   // Times Square building tiles add meshes on top.
   const render = (await page.evaluate(() => window.__ww!.query("render"))) as {

@@ -291,7 +291,7 @@ Dev server runs on **port 3001** (3000 belongs to another app on this machine).
 - [x] **PR34 `feat: motorcycles`** — lean visuals, fall-off on impact.
 - [x] **PR35 `feat: water, swimming, boats`** — `water` layer planes, swim
   mode, boat class at coastlines.
-- [ ] **PR36 `feat: helicopters + wanted 5–6★`** — simplified heli flight,
+- [x] **PR36 `feat: helicopters + wanted 5–6★`** — simplified heli flight,
   police heli + spotlight, heavy response.
 - [ ] **PR37 `feat: bridge decks + grade separation v2`** — elevated deck
   ribbons from `brunnel=bridge` + `layer`, drivable height overrides.

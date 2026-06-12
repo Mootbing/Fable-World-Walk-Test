@@ -13,6 +13,8 @@ const EPSILON: f64 = 0.01;
 /// Closed rings (first vertex == last), absolute world XZ meters.
 pub struct Footprint {
     pub rings: Vec<Vec<[f64; 2]>>,
+    /// Absolute roof height (world Y); aircraft above it fly clear.
+    pub top: f64,
 }
 
 pub struct CollisionWorld {
@@ -86,7 +88,13 @@ impl CollisionWorld {
 
     /// Resolve a circle at (x,z) with radius r out of all nearby footprints.
     /// Padded insertion means the single containing cell suffices.
-    pub fn resolve(&self, mut x: f64, mut z: f64, r: f64) -> (f64, f64) {
+    pub fn resolve(&self, x: f64, z: f64, r: f64) -> (f64, f64) {
+        self.resolve_below(x, z, r, f64::NEG_INFINITY)
+    }
+
+    /// Pushout that ignores footprints whose roof sits below `y` —
+    /// the helicopter clause. Ground users pass -inf and hit everything.
+    pub fn resolve_below(&self, mut x: f64, mut z: f64, r: f64, y: f64) -> (f64, f64) {
         let Some(candidates) = self.cells.get(&Self::cell_of(x, z)) else {
             return (x, z);
         };
@@ -98,6 +106,9 @@ impl CollisionWorld {
             let mut moved = false;
             for id in candidates {
                 let fp = &self.arena[id];
+                if fp.top < y {
+                    continue;
+                }
                 for ring in &fp.rings {
                     for i in 0..ring.len().saturating_sub(1) {
                         if let Some((px, pz)) = push_out_of_segment(x, z, r, ring[i], ring[i + 1]) {
@@ -118,12 +129,19 @@ impl CollisionWorld {
         // ONE footprint can land inside an abutting neighbor (rowhouses
         // share walls), so candidate exits are tried nearest-first and
         // accepted only if outside the union of all nearby footprints.
-        let inside_any =
-            |px: f64, pz: f64| candidates.iter().any(|id| point_in_footprint(px, pz, &self.arena[id]));
+        let inside_any = |px: f64, pz: f64| {
+            candidates.iter().any(|id| {
+                let fp = &self.arena[id];
+                fp.top >= y && point_in_footprint(px, pz, fp)
+            })
+        };
         if inside_any(x, z) {
             let mut exits: Vec<(f64, f64, f64)> = Vec::new(); // (d2, x, z)
             for id in candidates {
                 let fp = &self.arena[id];
+                if fp.top < y {
+                    continue;
+                }
                 for ring in &fp.rings {
                     for i in 0..ring.len().saturating_sub(1) {
                         let (cx, cz) = closest_on_segment(x, z, ring[i], ring[i + 1]);
@@ -274,6 +292,7 @@ mod tests {
 
     fn rect(x0: f64, z0: f64, x1: f64, z1: f64) -> Footprint {
         Footprint {
+            top: f64::MAX,
             rings: vec![vec![[x0, z0], [x1, z0], [x1, z1], [x0, z1], [x0, z0]]],
         }
     }
@@ -316,6 +335,7 @@ mod tests {
     fn courtyard_hole_counts_as_outside() {
         let mut w = CollisionWorld::new();
         let donut = Footprint {
+            top: f64::MAX,
             rings: vec![
                 vec![[0.0, 0.0], [40.0, 0.0], [40.0, 40.0], [0.0, 40.0], [0.0, 0.0]],
                 vec![[15.0, 15.0], [25.0, 15.0], [25.0, 25.0], [15.0, 25.0], [15.0, 15.0]],

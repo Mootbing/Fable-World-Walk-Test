@@ -15,7 +15,8 @@ pub const KIND_POLICE: u32 = 4;
 pub const KIND_SPORT: u32 = 5;
 pub const KIND_BIKE: u32 = 6;
 pub const KIND_BOAT: u32 = 7;
-pub const KIND_COUNT: u32 = 8;
+pub const KIND_HELI: u32 = 8;
+pub const KIND_COUNT: u32 = 9;
 
 /// Per-class handling envelope. Mirrored (dimensions only) by the
 /// renderer's kit table in engine/render/vehicleKits.ts.
@@ -48,6 +49,8 @@ pub const SPECS: [VehicleSpec; KIND_COUNT as usize] = [
     VehicleSpec { accel: 12.0, brake: 15.0, max_speed: 49.0, max_reverse: 5.0, steer_max: 0.62, grip: 9.5, wheelbase: 1.45, half_length: 1.1, half_width: 0.42 },
     // boat — loose, drifty, water-clamped by the sim
     VehicleSpec { accel: 6.0, brake: 6.0, max_speed: 24.0, max_reverse: 4.0, steer_max: 0.5, grip: 3.5, wheelbase: 3.0, half_length: 2.7, half_width: 1.15 },
+    // heli — flown by the sim's own flight branch, spec is dims + caps
+    VehicleSpec { accel: 9.0, brake: 9.0, max_speed: 38.0, max_reverse: 8.0, steer_max: 0.5, grip: 6.0, wheelbase: 2.4, half_length: 2.4, half_width: 0.8 },
 ];
 
 pub fn spec(kind: u32) -> &'static VehicleSpec {
@@ -77,6 +80,8 @@ pub struct Vehicle {
     pub yaw: f64,
     pub pitch: f64,
     pub roll: f64,
+    /// Vertical speed (helicopter collective).
+    pub v_vert: f64,
     pub v_long: f64,
     pub v_lat: f64,
     pub steer: f64,
@@ -108,6 +113,7 @@ impl Vehicle {
             yaw,
             pitch: 0.0,
             roll: 0.0,
+            v_vert: 0.0,
             v_long: 0.0,
             v_lat: 0.0,
             steer: 0.0,
@@ -412,6 +418,7 @@ mod tests {
         cw.add_tile(
             (0, 0),
             vec![Footprint {
+                top: f64::MAX,
                 rings: vec![vec![
                     [-50.0, -60.0],
                     [50.0, -60.0],
