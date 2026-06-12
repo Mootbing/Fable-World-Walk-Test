@@ -437,7 +437,21 @@ impl Traffic {
                 };
                 car.wheel_spin = (car.wheel_spin + car.speed * dt / WHEEL_RADIUS)
                     % std::f64::consts::TAU;
-                if let Some(g) = heights.sample(car.x, car.z) {
+                let mut ground = heights.sample(car.x, car.z);
+                if edge.bridge {
+                    if let (Some(&(sx, sz)), Some(&(ex2, ez2))) =
+                        (edge.points.first(), edge.points.last())
+                    {
+                        if let (Some(h0), Some(h1)) =
+                            (heights.sample(sx, sz), heights.sample(ex2, ez2))
+                        {
+                            let t = (car.s / edge.len.max(1e-9)).clamp(0.0, 1.0);
+                            let deck = h0 + (h1 - h0) * t;
+                            ground = Some(ground.map_or(deck, |g| g.max(deck)));
+                        }
+                    }
+                }
+                if let Some(g) = ground {
                     let smooth = match car.smooth_ground {
                         Some(s) => s + (g - s) * (dt * 8.0).min(1.0),
                         None => g,

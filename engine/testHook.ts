@@ -50,6 +50,10 @@ export function installTestHook(engine: WorldEngine): () => void {
           return engine.sim ? engine.sim.weaponState() : null;
         case "radio":
           return { station: engine.audio.station, name: engine.audio.stationName };
+        case "bridge":
+          return engine.sim
+            ? { edges: engine.sim.bridgeEdgeCount(), probe: engine.sim.bridgeProbe() }
+            : null;
         case "policeHeli":
           return engine.sim?.policeHeliActive() ?? false;
         case "swim":
@@ -250,6 +254,8 @@ export function installTestHook(engine: WorldEngine): () => void {
         case "setWeather":
           engine.sim?.setWeather(args[0] as number);
           return true;
+        case "deckAt":
+          return engine.sim?.deckProbe(args[0] as number, args[1] as number) ?? [];
         case "spawnBoat":
           return engine.sim?.spawnBoat(args[0] as number, args[1] as number) ?? 0;
         case "setClock":
