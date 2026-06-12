@@ -5,6 +5,7 @@ import { engineRef } from "@/engine/engineRef";
 import { useHud, LOCK_EVENT } from "@/engine/store";
 import { saveGame, loadGame, listSaves, SaveMeta } from "@/engine/save";
 import { getSettings, updateSettings } from "@/engine/settings";
+import { MISSIONS } from "@/game/missions";
 
 /**
  * Esc pauses (pointer unlock); this menu replaces the start overlay once
@@ -18,8 +19,22 @@ export default function PauseMenu() {
   const [saves, setSaves] = useState<SaveMeta[] | null>(null);
   const [flash, setFlash] = useState("");
   const [settings, setSettings] = useState(getSettings());
+  const [statsOpen, setStatsOpen] = useState(false);
 
   if (!ready || locked || mapOpen || !started) return null;
+  const engine = engineRef.current;
+  const counters = engine?.sim?.statsCounters() ?? [0, 0, 0, 0, 0];
+  const missionsDone = MISSIONS.filter((m) => engine?.missions.isDone(m.id)).length;
+  const statRows: [string, string][] = [
+    ["Distance on foot", `${(counters[0] / 1000).toFixed(2)} km`],
+    ["Distance by car", `${(counters[1] / 1000).toFixed(2)} km`],
+    ["Peds put down", String(counters[2])],
+    ["Cars jacked", String(counters[3])],
+    ["Shots fired", String(counters[4])],
+    ["Missions passed", `${missionsDone} / ${MISSIONS.length}`],
+    ["Taxi fares", String(engine?.totalFares ?? 0)],
+    ["Vigilante bounties", String(engine?.totalBounties ?? 0)],
+  ];
   const slots = saves ?? listSaves();
 
   const doSave = (slot: number) => {
@@ -78,6 +93,19 @@ export default function PauseMenu() {
             Invert look
           </label>
         </div>
+        <button onClick={() => setStatsOpen(!statsOpen)}>
+          {statsOpen ? "Hide stats" : "Stats"}
+        </button>
+        {statsOpen && (
+          <div className="pause-stats">
+            {statRows.map(([label, value]) => (
+              <div key={label} className="pause-stat-row">
+                <span>{label}</span>
+                <span>{value}</span>
+              </div>
+            ))}
+          </div>
+        )}
         {flash && <div className="pause-flash">{flash}</div>}
         <div className="pause-hint">Esc resumes pointer · M map · Tab weapons</div>
       </div>

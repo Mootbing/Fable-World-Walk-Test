@@ -20,6 +20,7 @@ import { extractPlaces, extractPois, resolveArea, Place, Poi } from "./places";
 import type { CameraClamp } from "./render/cameraRig";
 import { MissionRuntime } from "@/game/missionRuntime";
 import { Activities } from "@/game/activities";
+import { Shops } from "@/game/shops";
 import { MISSIONS } from "@/game/missions";
 import { useHud } from "./store";
 
@@ -106,6 +107,13 @@ export class WorldEngine {
   driveState: { yaw: number; speed: number } | null = null;
   readonly missions = new MissionRuntime();
   readonly activities = new Activities();
+  readonly shops = new Shops();
+  /** Lifetime activity tallies (stats screen). */
+  totalFares = 0;
+  totalBounties = 0;
+  /** TS-side POI registry per tile (sim holds its own copy). */
+  readonly poiTiles = new Map<string, Poi[]>();
+  private injectedPois = 0;
   /** Ped ids killed since the last mission start (eliminate objectives). */
   readonly killedPeds = new Set<number>();
   private marker: THREE.Mesh;
@@ -189,6 +197,7 @@ export class WorldEngine {
       if (places.length > 0) this.placeTiles.set(`${tx}/${ty}`, places);
       const pois = extractPois(buf, tx, ty, CONFIG.buildingZoom, this.anchor);
       if (pois.length > 0) {
+        this.poiTiles.set(`${tx}/${ty}`, pois);
         if (this.sim) this.uploadPois(tx, ty, pois);
         else this.pendingPois.set(`${tx}/${ty}`, { tx, ty, pois });
       }
@@ -204,6 +213,7 @@ export class WorldEngine {
     this.buildings.onTileDataRemoved = (tx, ty) => {
       this.placeTiles.delete(`${tx}/${ty}`);
       this.pendingPois.delete(`${tx}/${ty}`);
+      this.poiTiles.delete(`${tx}/${ty}`);
       this.sim?.unloadPois(tx, ty);
       if (!this.roadTiles.delete(`${tx}/${ty}`)) return;
       if (this.sim) {
@@ -301,7 +311,10 @@ export class WorldEngine {
         (input.aim ? BTN.aim : 0) |
         (input.reload ? BTN.reload : 0) |
         (input.switchWeapon ? BTN.switchWeapon : 0);
-      if (input.equipSlot !== null) this.sim.equipWeapon(input.equipSlot);
+      if (input.equipSlot !== null) {
+        if (this.shops.shopOpen) this.shops.buy(this, input.equipSlot);
+        else this.sim.equipWeapon(input.equipSlot);
+      }
       this.sim.setInput(
         buttons,
         input.moving ? input.dirX : 0,
@@ -382,6 +395,7 @@ export class WorldEngine {
     this.missions.update(this, dt);
     if (input.toggleActivity) this.activities.toggle(this);
     this.activities.update(this);
+    this.shops.update(this);
 
     // Mission start corona: the M01 marker waits near spawn.
     const nextMission = MISSIONS.find((m) => !this.missions.isDone(m.id));
@@ -498,6 +512,26 @@ export class WorldEngine {
     },
     sampleGround: (x, z) => this.heights.sample(x, z),
   };
+
+  /** Nearest POI of a kind across loaded tiles (and injected test POIs). */
+  nearestPoi(kind: number, x: number, z: number): { x: number; z: number; d: number } | null {
+    let best: { x: number; z: number; d: number } | null = null;
+    for (const pois of this.poiTiles.values()) {
+      for (const p of pois) {
+        if (p.kind !== kind) continue;
+        const d = Math.hypot(p.x - x, p.z - z);
+        if (!best || d < best.d) best = { x: p.x, z: p.z, d };
+      }
+    }
+    return best;
+  }
+
+  /** Test/debug: drop a synthetic POI into both registries. */
+  injectPoi(kind: number, x: number, z: number): void {
+    const n = this.injectedPois++;
+    this.poiTiles.set(`inject-${n}`, [{ kind, x, z }]);
+    this.sim?.loadPois(100_000 + n, 0, new Uint32Array([kind]), new Float32Array([x, z]));
+  }
 
   upsertBlip(id: string, x: number, z: number, color: string): void {
     const existing = this.blips.find((b) => b.id === id);

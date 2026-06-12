@@ -7,6 +7,7 @@ import Minimap from "./Minimap";
 import FullMap from "./FullMap";
 import WeaponWheel from "./WeaponWheel";
 import PauseMenu from "./PauseMenu";
+import ShopMenu from "./ShopMenu";
 
 // All three.js code lives behind this boundary; ssr:false keeps it out of
 // the server bundle entirely (and is only legal inside a client component).
@@ -23,6 +24,7 @@ export default function ClientWorld() {
       <Minimap />
       <FullMap />
       <WeaponWheel />
+      <ShopMenu />
       <PauseMenu />
       <StartOverlay />
     </div>

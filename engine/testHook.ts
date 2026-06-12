@@ -46,6 +46,15 @@ export function installTestHook(engine: WorldEngine): () => void {
           return engine.sim ? engine.sim.driving() : false;
         case "weapon":
           return engine.sim ? engine.sim.weaponState() : null;
+        case "shop": {
+          const spray = engine.nearestPoi(2, engine.playerX, engine.playerZ);
+          return {
+            open: engine.shops.shopOpen,
+            sprayDist: spray ? Math.round(spray.d) : -1,
+          };
+        }
+        case "counters":
+          return engine.sim?.statsCounters() ?? null;
         case "activity": {
           const a = engine.activities.active;
           return a
@@ -177,6 +186,12 @@ export function installTestHook(engine: WorldEngine): () => void {
           engine.sim?.equipWeapon(id);
           return true;
         }
+        case "spawnPoi":
+          engine.injectPoi(args[0] as number, args[1] as number, args[2] as number);
+          return true;
+        case "giveMoney":
+          engine.sim?.giveMoney(args[0] as number);
+          return true;
         case "toggleActivity":
           engine.activities.toggle(engine);
           return engine.activities.active?.type ?? null;

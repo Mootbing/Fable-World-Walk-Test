@@ -76,6 +76,7 @@ export class Activities {
           const reward = Math.round(FARE_BASE + FARE_PER_M * trip);
           engine.sim.giveMoney(reward);
           act.fares++;
+          engine.totalFares++;
           useHud.setState({ missionFlash: `Fare delivered · $${reward}` });
           const next = this.spawnFare(engine);
           if (!next) {
@@ -92,6 +93,7 @@ export class Activities {
       if (engine.isVehicleDestroyed(act.targetId)) {
         engine.sim.giveMoney(BOUNTY);
         act.bounties++;
+        engine.totalBounties++;
         useHud.setState({ missionFlash: `Target down · $${BOUNTY}` });
         const next = engine.sim.spawnMarkedCar();
         if (!next) {

@@ -41,6 +41,8 @@ interface HudState {
   busted: boolean;
   mission: { title: string; objective: string } | null;
   missionFlash: string;
+  /** Weapon shop menu up (standing at a hardware store). */
+  shopOpen: boolean;
   /** Game clock HH:MM. */
   clock: string;
 }
@@ -79,4 +81,5 @@ export const useHud = create<HudState>(() => ({
   busted: false,
   mission: null,
   missionFlash: "",
+  shopOpen: false,
 }));

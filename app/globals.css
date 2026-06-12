@@ -475,3 +475,40 @@ body {
   animation: area-fade 5s ease forwards;
   z-index: 14;
 }
+
+.shop-menu {
+  position: absolute;
+  right: 24px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: rgba(10, 12, 16, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  padding: 14px 18px;
+  color: #eee;
+  font: 13px/1.6 var(--font-geist-mono, monospace);
+  min-width: 230px;
+  pointer-events: none;
+}
+.shop-menu h2 { margin: 0 0 8px; font-size: 14px; letter-spacing: 2px; color: #8fd07f; }
+.shop-menu ul { list-style: none; margin: 0 0 8px; padding: 0; }
+.shop-menu li { display: flex; gap: 10px; align-items: baseline; }
+.shop-menu li.shop-broke { opacity: 0.45; }
+.shop-key {
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 3px;
+  padding: 0 5px;
+  font-size: 11px;
+}
+.shop-name { flex: 1; }
+.shop-price { color: #8fd07f; }
+.shop-menu p { margin: 0; font-size: 11px; opacity: 0.6; }
+.pause-stats { margin: 6px 0; }
+.pause-stat-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  font-size: 13px;
+  padding: 1px 0;
+  opacity: 0.9;
+}

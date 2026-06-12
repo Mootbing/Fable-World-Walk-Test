@@ -695,6 +695,90 @@ test("boots from fixtures, sim ticks, player walks", async ({ page }) => {
     timeout: 5_000,
   });
 
+  // PR27: shops — pay'n'spray clears wanted + repairs for $100; hardware
+  // stores sell weapons via Digit keys; lifetime counters tick.
+  await page.evaluate(() => window.__ww!.cmd("giveMoney", 3000));
+  const m27 = (await page.evaluate(
+    () => (window.__ww!.query("stats") as { money: number }).money,
+  )) as number;
+  const p27 = (await page.evaluate(() => window.__ww!.query("player"))) as {
+    x: number;
+    z: number;
+  };
+  await page.evaluate(
+    ([x, z]) => window.__ww!.cmd("spawnTraffic", x + 2.2, z, 0),
+    [p27.x, p27.z] as [number, number],
+  );
+  await page.evaluate(() => window.__ww!.press("KeyE", 250));
+  await page.waitForFunction(() => window.__ww!.query("driving") === true, undefined, {
+    timeout: 5_000,
+  });
+  await page.evaluate(() => window.__ww!.cmd("heat", 50)); // 2 stars
+  await page.evaluate(
+    ([x, z]) => window.__ww!.cmd("spawnPoi", 2, x, z), // spray bay on the car
+    [p27.x, p27.z] as [number, number],
+  );
+  await page.waitForFunction(
+    (m) =>
+      (window.__ww!.query("wanted") as number) === 0 &&
+      (window.__ww!.query("stats") as { money: number }).money === m - 100,
+    m27,
+    { timeout: 10_000 },
+  );
+  await page.evaluate(() => window.__ww!.press("KeyE", 250));
+  await page.waitForFunction(() => window.__ww!.query("driving") === false, undefined, {
+    timeout: 5_000,
+  });
+
+  // Hardware store: menu opens in range on foot, Digit2 buys the pistol.
+  await page.evaluate(
+    ([x, z]) => window.__ww!.cmd("warpPlayer", x, z),
+    [p27.x + 60, p27.z] as [number, number],
+  );
+  await page.evaluate(
+    ([x, z]) => window.__ww!.cmd("spawnPoi", 3, x, z),
+    [p27.x + 60, p27.z] as [number, number],
+  );
+  await page.waitForFunction(
+    () => (window.__ww!.query("shop") as { open: boolean }).open === true,
+    undefined,
+    { timeout: 5_000 },
+  );
+  const mShop = (await page.evaluate(
+    () => (window.__ww!.query("stats") as { money: number }).money,
+  )) as number;
+  for (let i = 0; i < 5; i++) {
+    await page.evaluate(() => window.__ww!.press("Digit2", 900));
+    await page.waitForTimeout(300);
+    const m = (await page.evaluate(
+      () => (window.__ww!.query("stats") as { money: number }).money,
+    )) as number;
+    if (m === mShop - 400) break;
+  }
+  expect(
+    await page.evaluate(() => (window.__ww!.query("stats") as { money: number }).money),
+  ).toBe(mShop - 400);
+  await page.evaluate(
+    ([x, z]) => window.__ww!.cmd("warpPlayer", x, z),
+    [p27.x + 140, p27.z] as [number, number],
+  );
+  await page.waitForFunction(
+    () => (window.__ww!.query("shop") as { open: boolean }).open === false,
+    undefined,
+    { timeout: 5_000 },
+  );
+  // Odometer: walking moves the on-foot counter (delta-based — most of
+  // the suite warps or drives, and save/load rolls counters back).
+  let counters = (await page.evaluate(() => window.__ww!.query("counters"))) as number[];
+  const w0 = counters[0];
+  for (let i = 0; i < 5 && counters[0] <= w0 + 1; i++) {
+    await page.evaluate(() => window.__ww!.press("KeyW", 1200));
+    counters = (await page.evaluate(() => window.__ww!.query("counters"))) as number[];
+  }
+  expect(counters[0]).toBeGreaterThan(w0 + 1);
+  expect(counters[1]).toBeGreaterThan(10); // m driven (missions, activities)
+  expect(counters[3]).toBeGreaterThanOrEqual(1); // cars jacked
+
   // World actually meshed: 9 terrain chunks alone are ~295k triangles, and
   // Times Square building tiles add meshes on top.
   const render = (await page.evaluate(() => window.__ww!.query("render"))) as {

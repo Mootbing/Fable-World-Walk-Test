@@ -59,13 +59,13 @@ export function extractPlaces(
 }
 
 export interface Poi {
-  /** 0 = hospital, 1 = police. */
+  /** 0 = hospital, 1 = police, 2 = pay'n'spray, 3 = weapon shop. */
   kind: number;
   x: number;
   z: number;
 }
 
-/** Hospitals + police stations from the `poi` layer (respawn anchors). */
+/** Gameplay POIs from the `poi` layer: respawn anchors + shops. */
 export function extractPois(
   buf: ArrayBuffer,
   tx: number,
@@ -86,8 +86,19 @@ export function extractPois(
   const out: Poi[] = [];
   for (let i = 0; i < layer.length; i++) {
     const feature = layer.feature(i);
-    const cls = String((feature.properties as Record<string, unknown>).class);
-    const kind = cls === "hospital" ? 0 : cls === "police" ? 1 : -1;
+    const props = feature.properties as Record<string, unknown>;
+    const cls = String(props.class);
+    const sub = String(props.subclass);
+    const kind =
+      cls === "hospital"
+        ? 0
+        : cls === "police"
+          ? 1
+          : sub === "car_repair"
+            ? 2
+            : sub === "hardware"
+              ? 3
+              : -1;
     if (kind < 0) continue;
     const p = feature.loadGeometry()[0]?.[0];
     if (!p) continue;
