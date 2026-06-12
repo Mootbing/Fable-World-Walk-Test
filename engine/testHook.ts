@@ -46,6 +46,12 @@ export function installTestHook(engine: WorldEngine): () => void {
           return engine.sim ? engine.sim.driving() : false;
         case "weapon":
           return engine.sim ? engine.sim.weaponState() : null;
+        case "audio":
+          return {
+            state: engine.audio.ctxState,
+            unlocked: engine.audio.unlocked,
+            voices: engine.audio.voicesPlayed,
+          };
         case "weather":
           return engine.sim
             ? {
