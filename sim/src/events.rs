@@ -30,6 +30,9 @@ pub const EV_RELOAD: u32 = 15;
 pub const EV_DRYFIRE: u32 = 16;
 /// a/b/c = x/y/z of the blast (f32 bits).
 pub const EV_EXPLOSION: u32 = 17;
+/// a = new level.
+pub const EV_WANTED_CHANGED: u32 = 18;
+pub const EV_BUSTED: u32 = 19;
 
 pub const EVENT_WORDS: usize = 4;
 const MAX_EVENTS: usize = 256;

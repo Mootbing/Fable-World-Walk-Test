@@ -117,7 +117,8 @@ export class PedPools {
       }
       this.root.compose(this.pos, this.quat, this.one);
 
-      this.color.setHex(SHIRT_PALETTE[variant % SHIRT_PALETTE.length]);
+      // Variant 100 = police uniform navy.
+      this.color.setHex(variant === 100 ? 0x1c2f52 : SHIRT_PALETTE[variant % SHIRT_PALETTE.length]);
       this.torso.push(this.root, this.color);
       this.head.push(this.root);
 

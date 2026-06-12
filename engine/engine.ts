@@ -393,6 +393,8 @@ export class WorldEngine {
         })(),
         weaponsOwned: this.sim ? this.sim.weaponsOwned() : 1,
         weaponEquipped: this.sim ? this.sim.weaponState().equipped : 0,
+        wanted: this.sim ? this.sim.wantedLevel() : 0,
+        busted: this.sim ? this.sim.isBusted() : false,
       });
       const area = resolveArea(this.placeTiles.values(), this.playerX, this.playerZ);
       if (area && area !== this.currentArea) {

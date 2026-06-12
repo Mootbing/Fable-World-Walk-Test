@@ -4,7 +4,9 @@
 //! speed-matching, and get pushed out of building footprints.
 
 use crate::collision::CollisionWorld;
+use crate::events::{Events, EV_GUNSHOT};
 use crate::rng::Pcg32;
+use crate::stats::PlayerStats;
 use crate::roads::{sample_polyline, RoadGraph};
 use crate::terrain::HeightGrid;
 
@@ -27,8 +29,10 @@ pub enum PedState {
     Walking,
     /// Running away from a point until the deadline, then despawn.
     Fleeing { from: (f64, f64), until: f64 },
-    /// Knocked down; gets up into Fleeing.
+    /// Knocked down; gets up into Fleeing (cops get up Chasing).
     Down { until: f64 },
+    /// Police: close on the player; armed cops stop and shoot at range.
+    Chasing,
 }
 
 enum Mode {
@@ -65,6 +69,10 @@ pub struct Ped {
     pub hp: f64,
     /// Down + dead: despawn when the timer runs out (corpse linger).
     pub dead: bool,
+    pub cop: bool,
+    pub cop_armed: bool,
+    /// Multi-use action cooldown (cop melee/shots).
+    aux_timer: f64,
     smooth_ground: Option<f64>,
 }
 
@@ -136,6 +144,9 @@ impl Peds {
             state: PedState::Fleeing { from, until },
             hp: 30.0,
             dead: false,
+            cop: false,
+            cop_armed: false,
+            aux_timer: 0.0,
             smooth_ground: None,
         });
         self.next_id += 1;
@@ -164,6 +175,9 @@ impl Peds {
             state: PedState::Walking,
             hp: 30.0,
             dead: false,
+            cop: false,
+            cop_armed: false,
+            aux_timer: 0.0,
             smooth_ground: None,
         });
         id
@@ -209,6 +223,82 @@ impl Peds {
             let _ = from;
             p.state = PedState::Down { until: time + 1.2 };
             false
+        }
+    }
+
+    /// Spawn a police officer at (x,z) closing on the player.
+    pub fn spawn_cop(&mut self, x: f64, z: f64, armed: bool) -> u32 {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.peds.push(Ped {
+            id,
+            variant: 100, // uniform navy (renderer special-cases)
+            x,
+            y: 0.0,
+            z,
+            yaw: 0.0,
+            speed: 0.0,
+            gait: 0.0,
+            edge: u32::MAX,
+            s: 0.0,
+            dir: 1.0,
+            side: 1.0,
+            jitter: 0.0,
+            walk_speed: 3.2,
+            mode: Mode::Rail,
+            state: PedState::Chasing,
+            hp: 40.0,
+            dead: false,
+            cop: true,
+            cop_armed: armed,
+            aux_timer: 0.0,
+            smooth_ground: None,
+        });
+        id
+    }
+
+    pub fn cop_count(&self) -> (u32, u32) {
+        let mut unarmed = 0;
+        let mut armed = 0;
+        for p in &self.peds {
+            if p.cop && !p.dead {
+                if p.cop_armed {
+                    armed += 1;
+                } else {
+                    unarmed += 1;
+                }
+            }
+        }
+        (unarmed, armed)
+    }
+
+    /// Any living cop with eyes on (or near) the player?
+    pub fn any_cop_sees(&self, collision: &CollisionWorld, px: f64, pz: f64) -> bool {
+        self.peds.iter().any(|p| {
+            if !p.cop || p.dead {
+                return false;
+            }
+            let d = ((p.x - px).powi(2) + (p.z - pz).powi(2)).sqrt();
+            d < 12.0 || (d < 60.0 && collision.raycast(p.x, p.z, px, pz).is_none())
+        })
+    }
+
+    /// Any living cop in grab range?
+    pub fn any_cop_adjacent(&self, px: f64, pz: f64) -> bool {
+        self.peds.iter().any(|p| {
+            p.cop
+                && !p.dead
+                && !matches!(p.state, PedState::Down { .. })
+                && ((p.x - px).powi(2) + (p.z - pz).powi(2)).sqrt() < 2.5
+        })
+    }
+
+    /// Dismiss the force (wanted cleared): cops jog off and despawn.
+    pub fn dismiss_cops(&mut self, time: f64) {
+        for p in &mut self.peds {
+            if p.cop && !p.dead {
+                p.state = PedState::Fleeing { from: (p.x + 0.1, p.z), until: time + 4.0 };
+            }
         }
     }
 
@@ -316,6 +406,9 @@ impl Peds {
         heights: &HeightGrid,
         collision: &CollisionWorld,
         player: (f64, f64),
+        player_in_vehicle: bool,
+        stats: &mut PlayerStats,
+        events: &mut Events,
         rng: &mut Pcg32,
         time: f64,
         dt: f64,
@@ -347,9 +440,13 @@ impl Peds {
                             self.peds.swap_remove(i);
                             continue;
                         }
-                        p.state = PedState::Fleeing {
-                            from: (p.x - p.yaw.sin(), p.z - p.yaw.cos()),
-                            until: time + 5.0,
+                        p.state = if p.cop {
+                            PedState::Chasing
+                        } else {
+                            PedState::Fleeing {
+                                from: (p.x - p.yaw.sin(), p.z - p.yaw.cos()),
+                                until: time + 5.0,
+                            }
                         };
                     }
                     if let Some(g) = heights.sample(p.x, p.z) {
@@ -400,6 +497,61 @@ impl Peds {
                     } else {
                         i += 1;
                     }
+                    continue;
+                }
+                PedState::Chasing => {
+                    let p = &mut self.peds[i];
+                    p.aux_timer = (p.aux_timer - dt).max(0.0);
+                    let dx = player.0 - p.x;
+                    let dz = player.1 - p.z;
+                    let d = (dx * dx + dz * dz).sqrt().max(0.01);
+                    let los = collision.raycast(p.x, p.z, player.0, player.1).is_none();
+
+                    // Armed: hold at range with line of sight and shoot.
+                    let hold = p.cop_armed && los && (7.0..30.0).contains(&d);
+                    let target_speed = if hold || d < 1.3 { 0.0 } else { p.walk_speed };
+                    p.speed += (target_speed - p.speed) * (dt * 6.0).min(1.0);
+                    if p.speed > 0.05 {
+                        let nx = p.x + dx / d * p.speed * dt;
+                        let nz = p.z + dz / d * p.speed * dt;
+                        let (rx, rz) = collision.resolve(nx, nz, PED_RADIUS);
+                        p.x = rx;
+                        p.z = rz;
+                        p.gait += p.speed * dt;
+                    }
+                    let target_yaw = (-(dx / d)).atan2(-(dz / d));
+                    let mut dy = target_yaw - p.yaw;
+                    dy = dy.sin().atan2(dy.cos());
+                    p.yaw += dy * (dt * 10.0).min(1.0);
+
+                    if p.aux_timer <= 0.0 && !stats.dead {
+                        if p.cop_armed && hold {
+                            p.aux_timer = 1.6;
+                            let hit = rng.next_below(100) < 60 && !player_in_vehicle;
+                            if hit {
+                                stats.damage(7.0, events);
+                            }
+                            events.push(
+                                EV_GUNSHOT,
+                                if hit { 4 } else { 0 },
+                                (p.x as f32).to_bits(),
+                                (p.z as f32).to_bits(),
+                            );
+                        } else if !p.cop_armed && d < 1.5 && !player_in_vehicle {
+                            p.aux_timer = 1.0;
+                            stats.damage(5.0, events);
+                        }
+                    }
+
+                    if let Some(g) = heights.sample(p.x, p.z) {
+                        let smooth = match p.smooth_ground {
+                            Some(sg) => sg + (g - sg) * (dt * 8.0).min(1.0),
+                            None => g,
+                        };
+                        p.smooth_ground = Some(smooth);
+                        p.y = smooth;
+                    }
+                    i += 1;
                     continue;
                 }
                 PedState::Walking => {}
@@ -623,6 +775,9 @@ impl Peds {
                 state: PedState::Walking,
                 hp: 30.0,
                 dead: false,
+                cop: false,
+                cop_armed: false,
+                aux_timer: 0.0,
                 smooth_ground: None,
             });
             self.next_id += 1;
@@ -675,8 +830,10 @@ mod tests {
         let mut peds = Peds::new();
         peds.target = 12;
         let mut rng = Pcg32::new(3);
+        let mut st = PlayerStats::new();
+        let mut ev2 = Events::new();
         for step in 0..1200 {
-            peds.substep(&g, &hg, &cw, (0.0, 0.0), &mut rng, step as f64 * DT, DT);
+            peds.substep(&g, &hg, &cw, (0.0, 0.0), false, &mut st, &mut ev2, &mut rng, step as f64 * DT, DT);
         }
         assert!(peds.count() >= 8, "spawned {}", peds.count());
         for p in &peds.peds {
@@ -684,7 +841,7 @@ mod tests {
         }
         // Walk away: everyone despawns.
         for step in 0..600 {
-            peds.substep(&g, &hg, &cw, (5_000.0, 0.0), &mut rng, step as f64 * DT, DT);
+            peds.substep(&g, &hg, &cw, (5_000.0, 0.0), false, &mut st, &mut ev2, &mut rng, step as f64 * DT, DT);
         }
         assert_eq!(peds.count(), 0);
     }
@@ -697,12 +854,14 @@ mod tests {
         let mut peds = Peds::new();
         peds.target = 10;
         let mut rng = Pcg32::new(9);
+        let mut st = PlayerStats::new();
+        let mut ev2 = Events::new();
         for step in 0..900 {
-            peds.substep(&g, &hg, &cw, (0.0, 0.0), &mut rng, step as f64 * DT, DT);
+            peds.substep(&g, &hg, &cw, (0.0, 0.0), false, &mut st, &mut ev2, &mut rng, step as f64 * DT, DT);
         }
         let before: Vec<(u32, f64, f64)> = peds.peds.iter().map(|p| (p.id, p.x, p.z)).collect();
         for step in 0..900 {
-            peds.substep(&g, &hg, &cw, (0.0, 0.0), &mut rng, step as f64 * DT, DT);
+            peds.substep(&g, &hg, &cw, (0.0, 0.0), false, &mut st, &mut ev2, &mut rng, step as f64 * DT, DT);
         }
         let mut moved = 0;
         for (id, x, z) in &before {
@@ -752,6 +911,8 @@ mod tests {
         let mut peds = Peds::new();
         peds.target = 0;
         let mut rng = Pcg32::new(1);
+        let mut st = PlayerStats::new();
+        let mut ev2 = Events::new();
         // Hand-place a ped walking north on the east sidewalk of x=0 street.
         let edge = (0..g.edges.len() as u32)
             .find(|e| {
@@ -780,12 +941,15 @@ mod tests {
             state: PedState::Walking,
             hp: 30.0,
             dead: false,
+            cop: false,
+            cop_armed: false,
+            aux_timer: 0.0,
             smooth_ground: None,
         });
         // Clamp s into the edge actually picked (length 100): start at 5.
         peds.peds[0].s = 5.0;
         for step in 0..600 {
-            peds.substep(&g, &hg, &cw, (0.0, 0.0), &mut rng, step as f64 * DT, DT);
+            peds.substep(&g, &hg, &cw, (0.0, 0.0), false, &mut st, &mut ev2, &mut rng, step as f64 * DT, DT);
         }
         // Never inside the footprint interior.
         let p = &peds.peds[0];

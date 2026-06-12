@@ -209,9 +209,18 @@ Dev server runs on **port 3001** (3000 belongs to another app on this machine).
   particle pools (one Points draw) + flags lanes. *Verified:* 61 Rust
   tests (SMG → boom chains to the neighbor, bystander dies, distant
   player safe); smoke detonates a car in-browser via held SMG fire.
-- [ ] **PR21 `feat: wanted system v1 — stars 1–3, pursuit, busted`** — crime
-  heat, cop spawns (foot→armed→cars w/ siren + A* pursuit), busted/evasion
-  state machine, police-station respawn.
+- [x] **PR21 `feat: wanted system v1 — stars 1–3, pursuit, busted`** —
+  `wanted.rs` heat machine (punch 6 / kill 25 / cop-kill 40 / carjack 15 /
+  run-over 12 / explosion 25 → thresholds 10/40/90), cops as Chasing-state
+  peds (navy uniform variant; unarmed grab+melee at 1★, armed hold-at-range
+  + LOS raycast shots at 2★+), 3★ adds greedy-routed pursuit cruisers
+  (sirens flag, 1.5× speed, next-edge-nearest-player); busted = 1.5 s in
+  the grab while still → 3 s hold → precinct release ($150 fine, weapons
+  confiscated, stars cleared); evasion: 15 s unseen → flash-clear; death
+  clears wanted; force maintenance every 1.5 s. *Verified:* 65 Rust tests
+  (chase→bust→fine/confiscate/relocate round trip, armed cops land shots,
+  evasion clears, arrest needs sustained adjacency); smoke raises stars,
+  sees uniformed cops spawn, and flips the evasion flag out of sight.
 - [ ] **PR22 `feat: wanted v2 — 4★ roadblocks, spikes, hospital/police POI respawn`** —
   roadblocks ahead on graph, spike strips, PIT; `poi` layer registry.
 
