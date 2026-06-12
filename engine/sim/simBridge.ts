@@ -292,6 +292,19 @@ export class SimBridge {
     this.sim.give_armor(amount);
   }
 
+  packagesFound(): number {
+    return this.sim.packages_found();
+  }
+
+  packagesSpawned(): number {
+    return this.sim.packages_spawned();
+  }
+
+  /** Nearest uncollected package [x, z], or [] if none nearby. */
+  packageNearest(x: number, z: number): number[] {
+    return Array.from(this.sim.package_nearest(x, z) as Float64Array);
+  }
+
   /** [m walked, m driven, peds killed, cars jacked, shots fired]. */
   statsCounters(): number[] {
     return Array.from(this.sim.stats_counters() as Float64Array);

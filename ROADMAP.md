@@ -271,7 +271,7 @@ Dev server runs on **port 3001** (3000 belongs to another app on this machine).
   timer/payout chains; criminal-vehicle takedowns in police cars.
 - [x] **PR27 `feat: pay'n'spray + weapon shop + stats screen`** — `car_repair`
   POIs clear wanted ≤2★ + repair; buy menu; pause stats page.
-- [ ] **PR28 `feat: hidden packages + ambulance activity`** — 50 seeded
+- [x] **PR28 `feat: hidden packages + ambulance activity`** — 50 seeded
   packages at POI-dense spots; timed patient delivery to hospitals.
 
 ## Phase 6 — Atmosphere & polish

@@ -32,6 +32,7 @@ export default function PauseMenu() {
     ["Cars jacked", String(counters[3])],
     ["Shots fired", String(counters[4])],
     ["Missions passed", `${missionsDone} / ${MISSIONS.length}`],
+    ["Hidden packages", `${engine?.sim?.packagesFound() ?? 0} / 50`],
     ["Taxi fares", String(engine?.totalFares ?? 0)],
     ["Vigilante bounties", String(engine?.totalBounties ?? 0)],
   ];

@@ -88,6 +88,12 @@ pub struct Sim {
     roadblock_timer: f64,
     /// (kind, x, z) per tile: 0 hospital, 1 police (respawn anchors).
     pois: std::collections::HashMap<(i32, i32), Vec<(u32, f64, f64)>>,
+    /// Hidden packages: lifetime found count and collected stable ids.
+    packages_found: u32,
+    packages_spawned: u32,
+    packages_collected: std::collections::HashSet<u32>,
+    /// Slots seeded per loaded road tile (for the spawned tally on unload).
+    package_tiles: std::collections::HashMap<(i32, i32), u32>,
     /// Lifetime tallies for the stats screen.
     dist_walked: f64,
     dist_driven: f64,
@@ -135,6 +141,10 @@ impl Sim {
             force_timer: 0.0,
             roadblock_timer: 0.0,
             pois: std::collections::HashMap::new(),
+            packages_found: 0,
+            packages_spawned: 0,
+            packages_collected: std::collections::HashSet::new(),
+            package_tiles: std::collections::HashMap::new(),
             dist_walked: 0.0,
             dist_driven: 0.0,
             peds_killed: 0,
@@ -227,6 +237,47 @@ impl Sim {
             lines.push((pts, roads::unpack_attr(line_attrs[li])));
         }
         self.roads.load_tile((tx, ty), &lines);
+        self.seed_packages(tx, ty, &lines);
+    }
+
+    /// Six deterministic hidden packages per road tile (slot ids use the
+    /// low 3 bits), tucked just off road vertices. Ids are stable across unload/reload; collected ones
+    /// stay gone.
+    fn seed_packages(&mut self, tx: i32, ty: i32, lines: &[(Vec<(f64, f64)>, roads::RoadAttr)]) {
+        if lines.is_empty() {
+            return;
+        }
+        let tile_bits = ((tx as u32 & 0x3fff) << 17) | ((ty as u32 & 0x3fff) << 3);
+        if self.package_tiles.contains_key(&(tx, ty)) {
+            return; // tile reloaded without unload
+        }
+        let mut slots = 0u32;
+        let mut rng = rng::Pcg32::new(rng::derive_seed(self.seed, "pkg", tx, ty));
+        for slot in 0..6u32 {
+            let id = tile_bits | slot;
+            if self.packages_collected.contains(&id) {
+                slots += 1;
+                self.packages_spawned += 1;
+                continue;
+            }
+            let line = &lines[rng.next_below(lines.len() as u32) as usize].0;
+            if line.len() < 2 {
+                continue;
+            }
+            let vi = rng.next_below((line.len() - 1) as u32) as usize;
+            let (ax, az) = line[vi];
+            let (bx, bz) = line[vi + 1];
+            let len = ((bx - ax).powi(2) + (bz - az).powi(2)).sqrt().max(1e-6);
+            // Perpendicular shove off the carriageway, alternating sides.
+            let side = if slot == 0 { 1.0 } else { -1.0 };
+            let x = (ax + bx) * 0.5 - (bz - az) / len * 4.0 * side;
+            let z = (az + bz) * 0.5 + (bx - ax) / len * 4.0 * side;
+            let y = self.heights.sample(x, z).unwrap_or(2.0) + 0.7;
+            self.pickups.spawn(x, y, z, pickups::KIND_PACKAGE, id as f64);
+            slots += 1;
+            self.packages_spawned += 1;
+        }
+        self.package_tiles.insert((tx, ty), slots);
     }
 
     /// POIs for one tile: flat kinds + xz pairs.
@@ -247,7 +298,7 @@ impl Sim {
     /// heat. Small and manual — no serde in the crate.
     pub fn snapshot(&self) -> Vec<f64> {
         let mut out = vec![
-            2.0, // version
+            3.0, // version
             self.player.x,
             self.player.z,
             self.stats.health,
@@ -268,14 +319,24 @@ impl Sim {
         out.push(self.peds_killed as f64);
         out.push(self.cars_jacked as f64);
         out.push(self.shots_fired as f64);
+        out.push(self.packages_found as f64);
+        out.push(self.packages_collected.len() as f64);
+        let mut ids: Vec<u32> = self.packages_collected.iter().copied().collect();
+        ids.sort_unstable();
+        out.extend(ids.iter().map(|id| *id as f64));
         out
     }
 
     /// Restore a snapshot; the player snaps to ground at the saved spot.
     pub fn restore(&mut self, data: &[f64]) -> bool {
         let version = data.first().copied().unwrap_or(0.0);
-        let min_len = if version == 2.0 { 24 } else { 19 };
-        if data.len() < min_len || !(version == 1.0 || version == 2.0) {
+        let min_len = match version {
+            1.0 => 19,
+            2.0 => 24,
+            3.0 => 26,
+            _ => return false,
+        };
+        if data.len() < min_len {
             return false;
         }
         self.driving = None;
@@ -298,12 +359,24 @@ impl Sim {
         }
         self.wanted.clear(&mut self.events);
         self.wanted.heat = 0.0;
-        if version == 2.0 {
+        if version >= 2.0 {
             self.dist_walked = data[19];
             self.dist_driven = data[20];
             self.peds_killed = data[21] as u32;
             self.cars_jacked = data[22] as u32;
             self.shots_fired = data[23] as u32;
+        }
+        if version >= 3.0 {
+            self.packages_found = data[24] as u32;
+            let n = data[25] as usize;
+            self.packages_collected =
+                data[26..(26 + n).min(data.len())].iter().map(|v| *v as u32).collect();
+            // Despawn anything on the ground that the save says is taken
+            // (the slot still counts as spawned for its loaded tile).
+            let collected = &self.packages_collected;
+            self.pickups.items.retain(|p| {
+                p.kind != pickups::KIND_PACKAGE || !collected.contains(&(p.value as u32))
+            });
         }
         let _ = data[18];
         self.peds.dismiss_cops(self.time);
@@ -332,6 +405,13 @@ impl Sim {
     }
 
     pub fn unload_tile_roads(&mut self, tx: i32, ty: i32) {
+        let tile_bits = ((tx as u32 & 0x3fff) << 17) | ((ty as u32 & 0x3fff) << 3);
+        self.pickups.items.retain(|p| {
+            p.kind != pickups::KIND_PACKAGE || (p.value as u32) & !0x7 != tile_bits
+        });
+        if let Some(slots) = self.package_tiles.remove(&(tx, ty)) {
+            self.packages_spawned -= slots;
+        }
         let removed = self.roads.unload_tile((tx, ty));
         self.traffic.despawn_edges(&removed);
         self.peds.despawn_edges(&removed);
@@ -593,6 +673,28 @@ impl Sim {
 
     pub fn give_armor(&mut self, amount: f64) {
         self.stats.add_armor(amount);
+    }
+
+    pub fn packages_found(&self) -> u32 {
+        self.packages_found
+    }
+
+    pub fn packages_spawned(&self) -> u32 {
+        self.packages_spawned
+    }
+
+    /// Nearest uncollected package [x, z], or empty if none spawned.
+    pub fn package_nearest(&self, x: f64, z: f64) -> Vec<f64> {
+        self.pickups
+            .items
+            .iter()
+            .filter(|p| p.kind == pickups::KIND_PACKAGE)
+            .min_by(|a, b| {
+                let da = (a.x - x).powi(2) + (a.z - z).powi(2);
+                let db = (b.x - x).powi(2) + (b.z - z).powi(2);
+                da.partial_cmp(&db).unwrap()
+            })
+            .map_or(Vec::new(), |p| vec![p.x, p.z])
     }
 
     /// [m walked, m driven, peds killed, cars jacked, shots fired].
@@ -875,13 +977,19 @@ impl Sim {
 
         self.update_vehicle_damage();
 
-        self.pickups.collect(
+        for (kind, value) in self.pickups.collect(
             self.player.x,
             self.player.z,
             &mut self.stats,
             &mut self.weapons,
             &mut self.events,
-        );
+        ) {
+            if kind == pickups::KIND_PACKAGE {
+                self.packages_found += 1;
+                self.packages_collected.insert(value as u32);
+                self.events.push(events::EV_PACKAGE, self.packages_found, 0, 0);
+            }
+        }
 
         // Unoccupied vehicles still settle (ground follow, rolling out).
         for i in 0..self.vehicles.len() {
@@ -1805,6 +1913,57 @@ mod tests {
             .find(|p| p.id == victim)
             .is_none_or(|p| p.dead);
         assert!(dead, "victim should be dead after three post-respawn punches");
+    }
+
+    #[test]
+    fn packages_seed_collect_and_persist() {
+        let roads_x: &[f32] = &[-300.0, 0.0, 300.0, 0.0];
+        let offs: &[u32] = &[0, 2];
+        let attrs: &[u32] = &[2 | (8 << 16)];
+
+        let mut sim = Sim::new(7, 0.0, 0.0);
+        sim.load_heightfield(0, 0, -500.0, -500.0, 1000.0, &vec![0.0; FIELD_SIZE * FIELD_SIZE]);
+        sim.load_tile_roads(0, 0, roads_x, offs, attrs);
+        assert_eq!(sim.packages_spawned(), 6);
+        let near = sim.package_nearest(0.0, 0.0);
+        assert_eq!(near.len(), 2);
+
+        // Determinism: a twin sim seeds the same spots.
+        let mut twin = Sim::new(7, 0.0, 0.0);
+        twin.load_heightfield(0, 0, -500.0, -500.0, 1000.0, &vec![0.0; FIELD_SIZE * FIELD_SIZE]);
+        twin.load_tile_roads(0, 0, roads_x, offs, attrs);
+        let tn = twin.package_nearest(0.0, 0.0);
+        assert!((near[0] - tn[0]).abs() < 1e-9 && (near[1] - tn[1]).abs() < 1e-9);
+
+        // Walk onto it: money + found tick, EV_PACKAGE in the ring.
+        sim.set_player_enabled(true);
+        let money = sim.player_money();
+        sim.set_player_pos(near[0], near[1]);
+        for _ in 0..240 {
+            sim.step(SUBSTEP); // land the drop, then collect
+        }
+        assert_eq!(sim.packages_found(), 1);
+        assert_eq!(sim.player_money(), money + 100.0);
+
+        // Unload/reload: the taken one stays gone, the other comes back.
+        sim.unload_tile_roads(0, 0);
+        assert_eq!(sim.packages_spawned(), 0);
+        sim.load_tile_roads(0, 0, roads_x, offs, attrs);
+        assert_eq!(sim.packages_spawned(), 6, "collected slot still counted");
+        let again = sim.package_nearest(near[0], near[1]);
+        let moved = (again[0] - near[0]).abs() + (again[1] - near[1]).abs();
+        assert!(moved > 1e-9, "collected package must not respawn in place");
+
+        // Snapshot v3 carries the collected set across a restore.
+        let snap = sim.snapshot();
+        let mut fresh = Sim::new(7, 0.0, 0.0);
+        fresh.load_heightfield(0, 0, -500.0, -500.0, 1000.0, &vec![0.0; FIELD_SIZE * FIELD_SIZE]);
+        fresh.load_tile_roads(0, 0, roads_x, offs, attrs);
+        assert!(fresh.restore(&snap));
+        assert_eq!(fresh.packages_found(), 1);
+        let fn2 = fresh.package_nearest(near[0], near[1]);
+        let moved2 = (fn2[0] - near[0]).abs() + (fn2[1] - near[1]).abs();
+        assert!(moved2 > 1e-9, "restore despawns saved-as-taken packages");
     }
 
     #[test]

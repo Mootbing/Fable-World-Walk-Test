@@ -779,6 +779,52 @@ test("boots from fixtures, sim ticks, player walks", async ({ page }) => {
   expect(counters[1]).toBeGreaterThan(10); // m driven (missions, activities)
   expect(counters[3]).toBeGreaterThanOrEqual(1); // cars jacked
 
+  // PR28: hidden packages seed deterministically on road tiles; walking
+  // onto one collects it. Ambulance activity arms from a van.
+  const pk28 = (await page.evaluate(() => window.__ww!.query("packages"))) as {
+    found: number;
+    spawned: number;
+    nearest: number[];
+  };
+  expect(pk28.spawned).toBeGreaterThanOrEqual(8);
+  expect(pk28.nearest.length).toBe(2);
+  await page.evaluate(
+    ([x, z]) => window.__ww!.cmd("warpPlayer", x, z),
+    [pk28.nearest[0], pk28.nearest[1]] as [number, number],
+  );
+  await page.waitForFunction(
+    (n) => (window.__ww!.query("packages") as { found: number }).found === n + 1,
+    pk28.found,
+    { timeout: 8_000 },
+  );
+
+  const p28 = (await page.evaluate(() => window.__ww!.query("player"))) as {
+    x: number;
+    z: number;
+  };
+  await page.evaluate(
+    ([x, z]) => window.__ww!.cmd("spawnTraffic", x + 2.2, z, 2), // the van moonlights
+    [p28.x, p28.z] as [number, number],
+  );
+  await page.evaluate(() => window.__ww!.press("KeyE", 250));
+  await page.waitForFunction(() => window.__ww!.query("driving") === true, undefined, {
+    timeout: 5_000,
+  });
+  const ambAct = (await page.evaluate(() => window.__ww!.cmd("toggleActivity"))) as string;
+  expect(ambAct).toBe("ambulance");
+  const amb = (await page.evaluate(() => window.__ww!.query("activity"))) as {
+    stage: string;
+    target: { x: number; z: number };
+  };
+  expect(amb.stage).toBe("pickup");
+  expect(Math.hypot(amb.target.x - p28.x, amb.target.z - p28.z)).toBeGreaterThan(30);
+  await page.evaluate(() => window.__ww!.cmd("toggleActivity"));
+  expect(await page.evaluate(() => window.__ww!.query("activity"))).toBe(null);
+  await page.evaluate(() => window.__ww!.press("KeyE", 250));
+  await page.waitForFunction(() => window.__ww!.query("driving") === false, undefined, {
+    timeout: 5_000,
+  });
+
   // World actually meshed: 9 terrain chunks alone are ~295k triangles, and
   // Times Square building tiles add meshes on top.
   const render = (await page.evaluate(() => window.__ww!.query("render"))) as {
