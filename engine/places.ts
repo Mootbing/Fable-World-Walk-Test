@@ -58,6 +58,48 @@ export function extractPlaces(
   return out;
 }
 
+export interface Poi {
+  /** 0 = hospital, 1 = police. */
+  kind: number;
+  x: number;
+  z: number;
+}
+
+/** Hospitals + police stations from the `poi` layer (respawn anchors). */
+export function extractPois(
+  buf: ArrayBuffer,
+  tx: number,
+  ty: number,
+  zoom: number,
+  anchor: WorldAnchor,
+): Poi[] {
+  let layer;
+  try {
+    const tile = new VectorTile(new Protobuf(new Uint8Array(buf)));
+    layer = tile.layers["poi"];
+  } catch {
+    return [];
+  }
+  if (!layer) return [];
+  const nw = anchor.tileNWWorld(tx, ty, zoom);
+  const size = anchor.tileWorldSize(zoom);
+  const out: Poi[] = [];
+  for (let i = 0; i < layer.length; i++) {
+    const feature = layer.feature(i);
+    const cls = String((feature.properties as Record<string, unknown>).class);
+    const kind = cls === "hospital" ? 0 : cls === "police" ? 1 : -1;
+    if (kind < 0) continue;
+    const p = feature.loadGeometry()[0]?.[0];
+    if (!p) continue;
+    out.push({
+      kind,
+      x: nw.x + (p.x / layer.extent) * size,
+      z: nw.z + (p.y / layer.extent) * size,
+    });
+  }
+  return out;
+}
+
 /** Most local place containing the position, by tier-banded nearest. */
 export function resolveArea(places: Iterable<Place[]>, x: number, z: number): string {
   let best: { name: string; tier: number; d: number } | null = null;

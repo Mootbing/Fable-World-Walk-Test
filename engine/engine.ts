@@ -16,7 +16,7 @@ import { FxPools } from "./render/fx";
 import { KITS } from "./render/vehicleKits";
 import { RoadDebugOverlay } from "./render/roadDebugOverlay";
 import { extractRoadTile, RoadTile } from "./roads";
-import { extractPlaces, resolveArea, Place } from "./places";
+import { extractPlaces, extractPois, resolveArea, Place, Poi } from "./places";
 import type { CameraClamp } from "./render/cameraRig";
 import { useHud } from "./store";
 
@@ -111,6 +111,7 @@ export class WorldEngine {
   private pendingTiles = new Map<string, PendingTile>();
   private pendingBuildings = new Map<string, { tx: number; ty: number; flat: FlatFootprints }>();
   private pendingRoads = new Map<string, { tx: number; ty: number; roads: RoadTile }>();
+  private pendingPois = new Map<string, { tx: number; ty: number; pois: Poi[] }>();
   private playerCache = { x: 0, y: 40, z: 0 };
 
   private diffTimer = DIFF_INTERVAL; // run the first diff immediately
@@ -176,6 +177,11 @@ export class WorldEngine {
     this.buildings.onTileData = (tx, ty, buf) => {
       const places = extractPlaces(buf, tx, ty, CONFIG.buildingZoom, this.anchor);
       if (places.length > 0) this.placeTiles.set(`${tx}/${ty}`, places);
+      const pois = extractPois(buf, tx, ty, CONFIG.buildingZoom, this.anchor);
+      if (pois.length > 0) {
+        if (this.sim) this.uploadPois(tx, ty, pois);
+        else this.pendingPois.set(`${tx}/${ty}`, { tx, ty, pois });
+      }
       const roads = extractRoadTile(buf, tx, ty, CONFIG.buildingZoom, this.anchor);
       if (!roads) return;
       this.roadTiles.set(`${tx}/${ty}`, roads);
@@ -187,6 +193,8 @@ export class WorldEngine {
     };
     this.buildings.onTileDataRemoved = (tx, ty) => {
       this.placeTiles.delete(`${tx}/${ty}`);
+      this.pendingPois.delete(`${tx}/${ty}`);
+      this.sim?.unloadPois(tx, ty);
       if (!this.roadTiles.delete(`${tx}/${ty}`)) return;
       if (this.sim) {
         this.sim.unloadTileRoads(tx, ty);
@@ -197,6 +205,16 @@ export class WorldEngine {
 
     this.group.add(this.roadDebug.group);
     void this.bootSim();
+  }
+
+  private uploadPois(tx: number, ty: number, pois: Poi[]): void {
+    const kinds = new Uint32Array(pois.map((p) => p.kind));
+    const coords = new Float32Array(pois.length * 2);
+    pois.forEach((p, i) => {
+      coords[i * 2] = p.x;
+      coords[i * 2 + 1] = p.z;
+    });
+    this.sim?.loadPois(tx, ty, kinds, coords);
   }
 
   /** Player position (sim-owned; cached per frame). Spawn pose pre-boot. */
@@ -230,6 +248,10 @@ export class WorldEngine {
         sim.loadTileRoads(r.tx, r.ty, r.roads.coords, r.roads.lineOffsets, r.roads.lineAttrs);
       }
       this.pendingRoads.clear();
+      for (const p of this.pendingPois.values()) {
+        this.uploadPois(p.tx, p.ty, p.pois);
+      }
+      this.pendingPois.clear();
       const avgMs = sim.benchmark(1000);
       console.info(
         `[sim] v${SimBridge.version} booted · 1k-entity readback ${avgMs.toFixed(3)} ms/pass`,
