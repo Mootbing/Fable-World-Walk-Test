@@ -46,6 +46,14 @@ export function installTestHook(engine: WorldEngine): () => void {
           return engine.sim ? engine.sim.driving() : false;
         case "weapon":
           return engine.sim ? engine.sim.weaponState() : null;
+        case "packages": {
+          if (!engine.sim) return null;
+          return {
+            found: engine.sim.packagesFound(),
+            spawned: engine.sim.packagesSpawned(),
+            nearest: engine.sim.packageNearest(engine.playerX, engine.playerZ),
+          };
+        }
         case "shop": {
           const spray = engine.nearestPoi(2, engine.playerX, engine.playerZ);
           return {
@@ -60,7 +68,9 @@ export function installTestHook(engine: WorldEngine): () => void {
           return a
             ? a.type === "taxi"
               ? { type: a.type, stage: a.stage, target: a.target, fares: a.fares }
-              : { type: a.type, targetId: a.targetId, bounties: a.bounties }
+              : a.type === "ambulance"
+                ? { type: a.type, stage: a.stage, target: a.target, runs: a.runs }
+                : { type: a.type, targetId: a.targetId, bounties: a.bounties }
             : null;
         }
         case "mission":

@@ -34,6 +34,8 @@ pub const EV_EXPLOSION: u32 = 17;
 /// a = new level.
 pub const EV_WANTED_CHANGED: u32 = 18;
 pub const EV_BUSTED: u32 = 19;
+/// Hidden package collected: a = lifetime found count.
+pub const EV_PACKAGE: u32 = 20;
 
 pub const EVENT_WORDS: usize = 4;
 const MAX_EVENTS: usize = 256;

@@ -24,11 +24,25 @@ interface VigilanteState {
   bounties: number;
 }
 
-export type ActivityState = TaxiState | VigilanteState | null;
+interface AmbulanceState {
+  type: "ambulance";
+  stage: "pickup" | "dropoff";
+  target: { x: number; z: number };
+  fareId: number;
+  runs: number;
+  /** performance.now()/1000 when the patient flatlines. */
+  deadline: number;
+}
+
+export type ActivityState = TaxiState | VigilanteState | AmbulanceState | null;
 
 const FARE_BASE = 20;
 const FARE_PER_M = 1.2;
 const BOUNTY = 300;
+/** Ambulance pay and clock: base seconds shrink per completed run. */
+const AMBULANCE_PAY = 150;
+const AMBULANCE_T = 75;
+const AMBULANCE_T_MIN = 35;
 
 export class Activities {
   active: ActivityState = null;
@@ -43,13 +57,59 @@ export class Activities {
     const kind = engine.sim.drivingKind();
     if (kind === 3) this.startTaxi(engine);
     else if (kind === 4) this.startVigilante(engine);
+    else if (kind === 2) this.startAmbulance(engine);
   }
 
   update(engine: WorldEngine): void {
     const act = this.active;
     if (!act || !engine.sim) return;
     if (!engine.sim.driving()) {
-      this.cancel(engine, act.type === "taxi" ? "Fare abandoned" : "Patrol over");
+      this.cancel(
+        engine,
+        act.type === "taxi"
+          ? "Fare abandoned"
+          : act.type === "ambulance"
+            ? "Patient abandoned"
+            : "Patrol over",
+      );
+      return;
+    }
+
+    if (act.type === "ambulance") {
+      const left = act.deadline - performance.now() / 1000;
+      if (left <= 0) {
+        this.cancel(engine, "The patient didn't make it");
+        return;
+      }
+      const d = Math.hypot(engine.playerX - act.target.x, engine.playerZ - act.target.z);
+      const stopped = Math.abs(engine.sim.drivingSpeed()) < 1.5;
+      const verb = act.stage === "pickup" ? "Reach the patient" : "Get them to the hospital";
+      useHud.setState({
+        mission: { title: "Paramedic", objective: `${verb} · 0:${String(Math.floor(left)).padStart(2, "0")}` },
+      });
+      if (d <= 9 && stopped) {
+        if (act.stage === "pickup") {
+          engine.sim.removePed(act.fareId);
+          const hospital = engine.nearestPoi(0, engine.playerX, engine.playerZ);
+          if (!hospital) {
+            this.cancel(engine, "No hospital in range");
+            return;
+          }
+          act.stage = "dropoff";
+          act.target = { x: hospital.x, z: hospital.z };
+          engine.setWaypoint(hospital.x, hospital.z);
+          engine.setMissionMarker(hospital.x, hospital.z);
+        } else {
+          const pay = AMBULANCE_PAY + act.runs * 50;
+          engine.sim.giveMoney(pay);
+          act.runs++;
+          useHud.setState({ missionFlash: `Patient delivered · $${pay}` });
+          if (!this.nextPatient(engine, act)) {
+            this.cancel(engine, "Shift over — no more calls");
+            return;
+          }
+        }
+      }
       return;
     }
 
@@ -164,6 +224,35 @@ export class Activities {
       }
     }
     return null;
+  }
+
+  private startAmbulance(engine: WorldEngine): void {
+    const act: AmbulanceState = {
+      type: "ambulance",
+      stage: "pickup",
+      target: { x: 0, z: 0 },
+      fareId: 0,
+      runs: 0,
+      deadline: 0,
+    };
+    this.active = act;
+    if (!this.nextPatient(engine, act)) {
+      this.active = null;
+      useHud.setState({ missionFlash: "No calls on the radio" });
+    }
+  }
+
+  /** Spawn the next casualty curbside and start their clock. */
+  private nextPatient(engine: WorldEngine, act: AmbulanceState): boolean {
+    const spot = this.routedPoint(engine, 80, 160);
+    if (!spot || !engine.sim) return false;
+    act.stage = "pickup";
+    act.target = spot;
+    act.fareId = engine.sim.debugSpawnPed(spot.x, spot.z);
+    act.deadline =
+      performance.now() / 1000 + Math.max(AMBULANCE_T_MIN, AMBULANCE_T - act.runs * 8);
+    this.aim(engine, spot, "Reach the patient");
+    return true;
   }
 
   private startVigilante(engine: WorldEngine): void {

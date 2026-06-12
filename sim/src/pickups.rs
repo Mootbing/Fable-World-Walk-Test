@@ -13,6 +13,9 @@ pub const KIND_AMMO: u32 = 4;
 pub const KIND_BAT: u32 = 5;
 pub const KIND_SMG: u32 = 6;
 pub const KIND_SHOTGUN: u32 = 7;
+/// Hidden package: value carries the stable package id, reward is fixed.
+pub const KIND_PACKAGE: u32 = 8;
+pub const PACKAGE_REWARD: i64 = 100;
 
 const COLLECT_RADIUS: f64 = 1.3;
 
@@ -54,9 +57,10 @@ impl Pickups {
         stats: &mut PlayerStats,
         weapons: &mut Weapons,
         events: &mut Events,
-    ) {
+    ) -> Vec<(u32, f64)> {
+        let mut taken = Vec::new();
         if stats.dead {
-            return;
+            return taken;
         }
         let mut i = 0;
         while i < self.items.len() {
@@ -71,14 +75,17 @@ impl Pickups {
                     KIND_BAT => weapons.give(crate::weapons::WEAPON_BAT, 0),
                     KIND_SMG => weapons.give(crate::weapons::WEAPON_SMG, p.value as u32),
                     KIND_SHOTGUN => weapons.give(crate::weapons::WEAPON_SHOTGUN, p.value as u32),
+                    KIND_PACKAGE => stats.add_money(PACKAGE_REWARD),
                     _ => stats.add_money(p.value as i64),
                 }
                 events.push(EV_PICKUP, p.kind, (p.value as f32).to_bits(), 0);
+                taken.push((p.kind, p.value));
                 self.items.swap_remove(i);
             } else {
                 i += 1;
             }
         }
+        taken
     }
 }
 

@@ -344,6 +344,15 @@ export class WorldEngine {
       if (events.length > 0) {
         for (let i = 0; i < events.length; i += 4) {
           if (events[i] === 13) this.killedPeds.add(events[i + 1]);
+          if (events[i] === 20) {
+            const n = events[i + 1];
+            if (n % 10 === 0) {
+              this.sim.giveMoney(1000);
+              useHud.setState({ missionFlash: `Hidden package ${n}/50 · +$100 · BONUS $1000` });
+            } else {
+              useHud.setState({ missionFlash: `Hidden package ${n}/50 · +$100` });
+            }
+          }
           if (events[i] === 17) {
             const f32 = new Float32Array(
               new Uint32Array([events[i + 1], events[i + 2], events[i + 3]]).buffer,
