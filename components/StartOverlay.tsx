@@ -7,8 +7,9 @@ export default function StartOverlay() {
   const ready = useHud((s) => s.ready);
   const locked = useHud((s) => s.locked);
   const mapOpen = useHud((s) => s.mapOpen);
+  const started = useHud((s) => s.started);
 
-  if (locked || mapOpen) return null;
+  if (locked || mapOpen || started) return null;
 
   return (
     <div className="overlay">

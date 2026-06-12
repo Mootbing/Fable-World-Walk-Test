@@ -232,6 +232,60 @@ impl Sim {
         self.pois.remove(&(tx, ty));
     }
 
+    /// Flat save snapshot (versioned): position, survival stats, arsenal,
+    /// heat. Small and manual — no serde in the crate.
+    pub fn snapshot(&self) -> Vec<f64> {
+        let mut out = vec![
+            1.0, // version
+            self.player.x,
+            self.player.z,
+            self.stats.health,
+            self.stats.armor,
+            self.stats.money as f64,
+            self.weapons.equipped as f64,
+            self.weapons.owned_mask() as f64,
+        ];
+        for i in 0..weapons::WEAPON_COUNT {
+            out.push(self.weapons.clip[i] as f64);
+        }
+        for i in 0..weapons::WEAPON_COUNT {
+            out.push(self.weapons.reserve[i] as f64);
+        }
+        out.push(self.wanted.heat);
+        out
+    }
+
+    /// Restore a snapshot; the player snaps to ground at the saved spot.
+    pub fn restore(&mut self, data: &[f64]) -> bool {
+        if data.len() < 19 || data[0] != 1.0 {
+            return false;
+        }
+        self.driving = None;
+        self.player.x = data[1];
+        self.player.z = data[2];
+        self.player.reset_vertical();
+        self.stats.health = data[3].clamp(1.0, stats::MAX_HEALTH);
+        self.stats.armor = data[4].clamp(0.0, stats::MAX_ARMOR);
+        self.stats.money = data[5] as i64;
+        self.stats.dead = false;
+        let owned_mask = data[7] as u32;
+        for i in 0..weapons::WEAPON_COUNT {
+            self.weapons.owned[i] = owned_mask & (1 << i) != 0;
+            self.weapons.clip[i] = data[8 + i] as u32;
+            self.weapons.reserve[i] = data[13 + i] as u32;
+        }
+        self.weapons.equipped = (data[6] as u32).min(weapons::WEAPON_COUNT as u32 - 1);
+        if !self.weapons.owned[self.weapons.equipped as usize] {
+            self.weapons.equipped = weapons::WEAPON_FIST;
+        }
+        self.wanted.clear(&mut self.events);
+        self.wanted.heat = 0.0;
+        let _ = data[18];
+        self.peds.dismiss_cops(self.time);
+        self.traffic.end_pursuits();
+        true
+    }
+
     pub fn poi_count(&self) -> u32 {
         self.pois.values().map(|v| v.len() as u32).sum()
     }
@@ -1597,6 +1651,75 @@ mod tests {
         assert!((sim.player_x()).abs() < 1e-6 && (sim.player_z()).abs() < 1e-6);
         assert_eq!(sim.player_money() as i64, money_before as i64 - 100);
         assert!((sim.player_health() - 100.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn punching_works_after_hospital_respawn() {
+        let mut sim = Sim::new(1, 0.0, 0.0);
+        sim.load_heightfield(0, 0, -500.0, -500.0, 1000.0, &vec![0.0; FIELD_SIZE * FIELD_SIZE]);
+        sim.set_player_enabled(true);
+        sim.load_pois(0, 0, &[0], &[60.0, 80.0]);
+        sim.damage_player(999.0);
+        for _ in 0..400 {
+            sim.step(SUBSTEP);
+            if !sim.player_dead() {
+                break;
+            }
+        }
+        assert!(!sim.player_dead());
+        assert!((sim.player_x() - 60.0).abs() < 1.0);
+
+        let victim = sim.debug_spawn_ped(sim.player_x(), sim.player_z() - 1.2);
+        for _ in 0..30 {
+            sim.step(SUBSTEP);
+        }
+        // Three punch presses with releases between.
+        for _ in 0..3 {
+            sim.set_input(input::BTN_FIRE, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+            sim.step(SUBSTEP);
+            sim.set_input(0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+            for _ in 0..40 {
+                sim.step(SUBSTEP);
+            }
+        }
+        let dead = sim
+            .peds
+            .peds
+            .iter()
+            .find(|p| p.id == victim)
+            .is_none_or(|p| p.dead);
+        assert!(dead, "victim should be dead after three post-respawn punches");
+    }
+
+    #[test]
+    fn snapshot_restore_round_trip() {
+        let mut sim = Sim::new(1, 0.0, 0.0);
+        sim.load_heightfield(0, 0, -500.0, -500.0, 1000.0, &vec![7.0; FIELD_SIZE * FIELD_SIZE]);
+        sim.set_player_enabled(true);
+        sim.set_player_pos(33.0, -44.0);
+        sim.give_weapon(weapons::WEAPON_SHOTGUN, 18);
+        sim.damage_player(25.0);
+        for _ in 0..30 {
+            sim.step(SUBSTEP);
+        }
+        let snap = sim.snapshot();
+
+        // Trash the state.
+        sim.set_player_pos(200.0, 200.0);
+        sim.damage_player(50.0);
+        sim.give_weapon(weapons::WEAPON_BAT, 0);
+
+        assert!(sim.restore(&snap));
+        for _ in 0..10 {
+            sim.step(SUBSTEP);
+        }
+        assert!((sim.player_x() - 33.0).abs() < 0.6);
+        assert!((sim.player_z() + 44.0).abs() < 0.6);
+        assert!((sim.player_y() - (7.0 + 1.7)).abs() < 0.2, "snapped to ground");
+        assert!((sim.player_health() - 75.0).abs() < 1.0);
+        assert_eq!(sim.weapon_equipped(), weapons::WEAPON_SHOTGUN);
+        assert_eq!(sim.weapons_owned() & (1 << weapons::WEAPON_BAT), 0, "bat not in snapshot");
+        assert!(!sim.restore(&[2.0; 19]), "wrong version rejected");
     }
 
     #[test]

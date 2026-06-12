@@ -1,4 +1,5 @@
 import { useHud } from "./store";
+import { saveGame, loadGame } from "./save";
 import type { WorldEngine } from "./engine";
 
 /**
@@ -159,6 +160,14 @@ export function installTestHook(engine: WorldEngine): () => void {
           const [id] = args as [number];
           engine.sim?.equipWeapon(id);
           return true;
+        }
+        case "save": {
+          const [slot] = args as [number];
+          return saveGame(engine, slot ?? 1);
+        }
+        case "load": {
+          const [slot] = args as [number];
+          return loadGame(engine, slot ?? 1);
         }
         case "heat": {
           const [n] = args as [number];
