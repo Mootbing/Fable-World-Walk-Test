@@ -151,12 +151,20 @@ export class VehiclePools {
 
       const spin = f32[base + LANE.animPhase];
       const steer = f32[base + LANE.aux0];
-      for (const [sx, sz, front] of [
-        [kit.track / 2, -kit.wheelbase / 2, true],
-        [-kit.track / 2, -kit.wheelbase / 2, true],
-        [kit.track / 2, kit.wheelbase / 2, false],
-        [-kit.track / 2, kit.wheelbase / 2, false],
-      ] as [number, number, boolean][]) {
+      const wheelSpots: [number, number, boolean][] =
+        kit.track === 0
+          ? [
+              // Bikes: one wheel each end on the centerline.
+              [0, -kit.wheelbase / 2, true],
+              [0, kit.wheelbase / 2, false],
+            ]
+          : [
+              [kit.track / 2, -kit.wheelbase / 2, true],
+              [-kit.track / 2, -kit.wheelbase / 2, true],
+              [kit.track / 2, kit.wheelbase / 2, false],
+              [-kit.track / 2, kit.wheelbase / 2, false],
+            ];
+      for (const [sx, sz, front] of wheelSpots) {
         this.wheelPos.set(sx, WHEEL_RADIUS, sz);
         this.wheelQuat.setFromAxisAngle(this.yAxis, front ? -steer : 0);
         this.spinQuat.setFromAxisAngle(this.xAxis, -spin);

@@ -953,6 +953,47 @@ test("boots from fixtures, sim ticks, player walks", async ({ page }) => {
   );
   await page.screenshot({ path: "test-results/characters.png" });
 
+  // PR34: motorcycles — the bike leans into corners with the rider aboard.
+  const p34 = (await page.evaluate(() => window.__ww!.query("player"))) as {
+    x: number;
+    z: number;
+  };
+  await page.evaluate(
+    ([x, z]) => window.__ww!.cmd("warpPlayer", x, z),
+    [p34.x - 45, p34.z] as [number, number],
+  );
+  await page.evaluate(
+    ([x, z]) => window.__ww!.cmd("spawnTraffic", x - 43, z, 6), // the bike
+    [p34.x, p34.z] as [number, number],
+  );
+  await page.evaluate(() => window.__ww!.press("KeyE", 250));
+  await page.waitForFunction(() => window.__ww!.query("driving") === true, undefined, {
+    timeout: 5_000,
+  });
+  expect(await page.evaluate(() => window.__ww!.query("drivingKind"))).toBe(6);
+  // Throttle + full lock: watch the roll component build.
+  let lean34 = 0;
+  for (let i = 0; i < 6 && lean34 < 0.06; i++) {
+    await page.evaluate(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { code: "KeyW", bubbles: true }));
+      window.dispatchEvent(new KeyboardEvent("keydown", { code: "KeyA", bubbles: true }));
+    });
+    await page.waitForTimeout(1000);
+    lean34 = Math.abs(
+      (await page.evaluate(() => window.__ww!.query("lean"))) as number,
+    );
+    await page.evaluate(() => {
+      window.dispatchEvent(new KeyboardEvent("keyup", { code: "KeyW", bubbles: true }));
+      window.dispatchEvent(new KeyboardEvent("keyup", { code: "KeyA", bubbles: true }));
+    });
+    await page.waitForTimeout(200);
+  }
+  expect(lean34).toBeGreaterThan(0.06);
+  await page.evaluate(() => window.__ww!.press("KeyE", 250));
+  await page.waitForFunction(() => window.__ww!.query("driving") === false, undefined, {
+    timeout: 5_000,
+  });
+
   // World actually meshed: 9 terrain chunks alone are ~295k triangles, and
   // Times Square building tiles add meshes on top.
   const render = (await page.evaluate(() => window.__ww!.query("render"))) as {
