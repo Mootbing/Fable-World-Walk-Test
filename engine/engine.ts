@@ -18,6 +18,8 @@ import { RoadDebugOverlay } from "./render/roadDebugOverlay";
 import { extractRoadTile, RoadTile } from "./roads";
 import { extractPlaces, extractPois, resolveArea, Place, Poi } from "./places";
 import type { CameraClamp } from "./render/cameraRig";
+import { MissionRuntime } from "@/game/missionRuntime";
+import { MISSIONS, M01 } from "@/game/missions";
 import { useHud } from "./store";
 
 export const WEAPON_NAMES = ["Fists", "Bat", "Pistol", "SMG", "Shotgun"];
@@ -100,6 +102,9 @@ export class WorldEngine {
   private fxTimer = 0;
   /** Per-frame driving snapshot for the chase cam + HUD. */
   driveState: { yaw: number; speed: number } | null = null;
+  readonly missions = new MissionRuntime();
+  private marker: THREE.Mesh;
+  private markerPos: { x: number; z: number } | null = null;
 
   private queue: FetchQueue;
   private heights: HeightFieldRegistry;
@@ -202,6 +207,20 @@ export class WorldEngine {
         this.pendingRoads.delete(`${tx}/${ty}`);
       }
     };
+
+    // Mission marker corona: one reusable additive cylinder.
+    this.marker = new THREE.Mesh(
+      new THREE.CylinderGeometry(2.6, 2.6, 1.4, 24, 1, true),
+      new THREE.MeshBasicMaterial({
+        color: 0xe8b54a,
+        transparent: true,
+        opacity: 0.4,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      }),
+    );
+    this.marker.visible = false;
+    this.group.add(this.marker);
 
     this.group.add(this.roadDebug.group);
     void this.bootSim();
@@ -354,6 +373,33 @@ export class WorldEngine {
     }
     this.buildings.processBuildQueue();
     this.updateGps(dt);
+    this.missions.update(this, dt);
+
+    // Mission start corona: the M01 marker waits near spawn.
+    if (
+      this.sim &&
+      !this.missions.activeMissionId &&
+      !this.missions.isDone(M01.id) &&
+      this.markerPos === null
+    ) {
+      this.setMissionMarker(6, 8);
+    }
+    if (
+      this.sim &&
+      !this.missions.activeMissionId &&
+      !this.missions.isDone(M01.id) &&
+      this.markerPos &&
+      Math.hypot(this.playerX - this.markerPos.x, this.playerZ - this.markerPos.z) < 2.6
+    ) {
+      this.missions.start(MISSIONS[0], this);
+    }
+    if (this.marker.visible) {
+      this.marker.rotation.y += dt * 1.2;
+      if (this.markerPos) {
+        const g = this.heights.sample(this.markerPos.x, this.markerPos.z);
+        this.marker.position.set(this.markerPos.x, (g ?? 0) + 0.7, this.markerPos.z);
+      }
+    }
 
     if (!this.ready && this.sim) {
       const groundLoaded = this.heights.sample(this.playerX, this.playerZ) !== null;
@@ -449,6 +495,17 @@ export class WorldEngine {
     sampleGround: (x, z) => this.heights.sample(x, z),
   };
 
+  /** Mission marker corona position (null hides it). */
+  setMissionMarker(x: number | null, z: number | null): void {
+    if (x === null || z === null) {
+      this.markerPos = null;
+      this.marker.visible = false;
+      return;
+    }
+    this.markerPos = { x, z };
+    this.marker.visible = true;
+  }
+
   /** Set the GPS waypoint: magenta blip + routed line on radar and map. */
   setWaypoint(x: number, z: number): void {
     this.waypoint = { x, z };
@@ -501,6 +558,8 @@ export class WorldEngine {
     this.disposed = true;
     this.chunks.disposeAll();
     this.buildings.disposeAll();
+    this.marker.geometry.dispose();
+    (this.marker.material as THREE.Material).dispose();
     this.avatar.dispose();
     this.vehiclePools.dispose();
     this.pedPools.dispose();

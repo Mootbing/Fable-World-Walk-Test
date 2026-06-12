@@ -192,6 +192,18 @@ export class SimBridge {
     return this.sim.driving_kind();
   }
 
+  drivingVehicleId(): number {
+    return this.sim.driving_vehicle_id();
+  }
+
+  giveMoney(amount: number): void {
+    this.sim.give_money(amount);
+  }
+
+  clearWanted(): void {
+    this.sim.clear_wanted();
+  }
+
   trafficCount(): number {
     return this.sim.traffic_count();
   }
