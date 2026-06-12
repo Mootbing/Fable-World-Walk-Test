@@ -279,6 +279,24 @@ export class SimBridge {
     };
   }
 
+  /** 0 ok, 1 on foot, 2 too hot, 3 broke. */
+  sprayVehicle(): number {
+    return this.sim.spray_vehicle();
+  }
+
+  tryCharge(amount: number): boolean {
+    return this.sim.try_charge(amount);
+  }
+
+  giveArmor(amount: number): void {
+    this.sim.give_armor(amount);
+  }
+
+  /** [m walked, m driven, peds killed, cars jacked, shots fired]. */
+  statsCounters(): number[] {
+    return Array.from(this.sim.stats_counters() as Float64Array);
+  }
+
   removePed(id: number): boolean {
     return this.sim.remove_ped(id);
   }

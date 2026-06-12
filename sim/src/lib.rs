@@ -88,6 +88,12 @@ pub struct Sim {
     roadblock_timer: f64,
     /// (kind, x, z) per tile: 0 hospital, 1 police (respawn anchors).
     pois: std::collections::HashMap<(i32, i32), Vec<(u32, f64, f64)>>,
+    /// Lifetime tallies for the stats screen.
+    dist_walked: f64,
+    dist_driven: f64,
+    peds_killed: u32,
+    cars_jacked: u32,
+    shots_fired: u32,
     events: Events,
     /// Preallocated at MAX_ENTITIES so the pointer never moves (no wasm
     /// memory growth from the entity buffer itself).
@@ -129,6 +135,11 @@ impl Sim {
             force_timer: 0.0,
             roadblock_timer: 0.0,
             pois: std::collections::HashMap::new(),
+            dist_walked: 0.0,
+            dist_driven: 0.0,
+            peds_killed: 0,
+            cars_jacked: 0,
+            shots_fired: 0,
             events: Events::new(),
             entities: vec![0.0; MAX_ENTITIES * ENTITY_STRIDE],
             entity_count: 1, // entity 0 is always the player
@@ -236,7 +247,7 @@ impl Sim {
     /// heat. Small and manual — no serde in the crate.
     pub fn snapshot(&self) -> Vec<f64> {
         let mut out = vec![
-            1.0, // version
+            2.0, // version
             self.player.x,
             self.player.z,
             self.stats.health,
@@ -252,12 +263,19 @@ impl Sim {
             out.push(self.weapons.reserve[i] as f64);
         }
         out.push(self.wanted.heat);
+        out.push(self.dist_walked);
+        out.push(self.dist_driven);
+        out.push(self.peds_killed as f64);
+        out.push(self.cars_jacked as f64);
+        out.push(self.shots_fired as f64);
         out
     }
 
     /// Restore a snapshot; the player snaps to ground at the saved spot.
     pub fn restore(&mut self, data: &[f64]) -> bool {
-        if data.len() < 19 || data[0] != 1.0 {
+        let version = data.first().copied().unwrap_or(0.0);
+        let min_len = if version == 2.0 { 24 } else { 19 };
+        if data.len() < min_len || !(version == 1.0 || version == 2.0) {
             return false;
         }
         self.driving = None;
@@ -280,6 +298,13 @@ impl Sim {
         }
         self.wanted.clear(&mut self.events);
         self.wanted.heat = 0.0;
+        if version == 2.0 {
+            self.dist_walked = data[19];
+            self.dist_driven = data[20];
+            self.peds_killed = data[21] as u32;
+            self.cars_jacked = data[22] as u32;
+            self.shots_fired = data[23] as u32;
+        }
         let _ = data[18];
         self.peds.dismiss_cops(self.time);
         self.traffic.end_pursuits();
@@ -538,6 +563,49 @@ impl Sim {
         self.traffic.end_pursuits();
     }
 
+    /// Pay'n'spray: $100 repaints + repairs the ride and clears wanted.
+    /// 0 = done, 1 = on foot, 2 = too hot (3 stars and up), 3 = broke.
+    pub fn spray_vehicle(&mut self) -> u32 {
+        let Some(i) = self.driving else { return 1 };
+        if self.wanted.level > 2 {
+            return 2;
+        }
+        if self.stats.money < 100 {
+            return 3;
+        }
+        self.stats.money -= 100;
+        let v = &mut self.vehicles[i];
+        v.hp = 100.0;
+        v.paint = self.rng.next_below(8);
+        self.clear_wanted();
+        0
+    }
+
+    /// Deduct if affordable (shop purchases); true on success.
+    pub fn try_charge(&mut self, amount: f64) -> bool {
+        let amount = amount as i64;
+        if self.stats.money < amount {
+            return false;
+        }
+        self.stats.money -= amount;
+        true
+    }
+
+    pub fn give_armor(&mut self, amount: f64) {
+        self.stats.add_armor(amount);
+    }
+
+    /// [m walked, m driven, peds killed, cars jacked, shots fired].
+    pub fn stats_counters(&self) -> Vec<f64> {
+        vec![
+            self.dist_walked,
+            self.dist_driven,
+            self.peds_killed as f64,
+            self.cars_jacked as f64,
+            self.shots_fired as f64,
+        ]
+    }
+
     pub fn driving(&self) -> bool {
         self.driving.is_some()
     }
@@ -748,6 +816,7 @@ impl Sim {
                     self.wanted.add_heat(6.0, &mut self.events);
                     if killed {
                         self.events.push(EV_PED_KILLED, hit_id, 0, 0);
+                    self.peds_killed += 1;
                         self.wanted.add_heat(25.0, &mut self.events);
                         let drop = 10 + self.rng.next_below(40) as i64;
                         let y = self.heights.sample(hx, hz).unwrap_or(0.0);
@@ -773,11 +842,16 @@ impl Sim {
             );
             // Player rides along (seated eye a bit above the deck).
             let v = &self.vehicles[i];
+            let moved = ((v.x - self.player.x).powi(2) + (v.z - self.player.z).powi(2)).sqrt();
+            if moved < 5.0 {
+                self.dist_driven += moved;
+            }
             self.player.x = v.x;
             self.player.z = v.z;
             self.player.y = v.y + 1.3;
             self.player.yaw = v.yaw;
         } else {
+            let (wx, wz) = (self.player.x, self.player.z);
             let impact = self.player.substep(
                 &self.input,
                 &self.heights,
@@ -790,6 +864,12 @@ impl Sim {
                     let dmg = (impact - stats::SAFE_FALL_SPEED) * stats::FALL_DAMAGE_PER_MS;
                     self.stats.damage(dmg, &mut self.events);
                 }
+            }
+            let moved =
+                ((self.player.x - wx).powi(2) + (self.player.z - wz).powi(2)).sqrt();
+            if moved < 5.0 {
+                // Warps/respawns don't count as cardio.
+                self.dist_walked += moved;
             }
         }
 
@@ -1127,6 +1207,7 @@ impl Sim {
                 let hit_id = self.peds.peds[i].id;
                 if self.peds.apply_damage(i, 200.0, (x, z), self.time) {
                     self.events.push(EV_PED_KILLED, hit_id, 0, 0);
+                    self.peds_killed += 1;
                 }
             }
         }
@@ -1226,6 +1307,7 @@ impl Sim {
                 let hit_id = self.peds.peds[i].id;
                 if self.peds.apply_damage(i, s.damage, (ox, oz), self.time) {
                     self.events.push(EV_PED_KILLED, hit_id, 0, 0);
+                    self.peds_killed += 1;
                     self.wanted
                         .add_heat(if was_cop { 40.0 } else { 25.0 }, &mut self.events);
                     if !was_cop {
@@ -1249,6 +1331,7 @@ impl Sim {
         if any_loud {
             self.peds.scatter((ox, oz), 16.0, self.time + 5.0);
         }
+        self.shots_fired += 1;
         self.punch_anim = 1.0; // arm-extend pose doubles as recoil
     }
 
@@ -1305,6 +1388,7 @@ impl Sim {
         self.vehicles.push(v);
         self.driving = Some(self.vehicles.len() - 1);
         self.events.push(EV_CARJACK, id, 0, 0);
+        self.cars_jacked += 1;
         self.wanted.add_heat(15.0, &mut self.events);
         self.events.push(EV_VEHICLE_ENTER, id, 0, 0);
     }
@@ -1752,6 +1836,85 @@ mod tests {
         assert_eq!(sim.weapon_equipped(), weapons::WEAPON_SHOTGUN);
         assert_eq!(sim.weapons_owned() & (1 << weapons::WEAPON_BAT), 0, "bat not in snapshot");
         assert!(!sim.restore(&[2.0; 19]), "wrong version rejected");
+    }
+
+    #[test]
+    fn spray_repairs_clears_and_charges() {
+        let mut sim = Sim::new(1, 0.0, 0.0);
+        sim.load_heightfield(0, 0, -500.0, -500.0, 1000.0, &vec![0.0; FIELD_SIZE * FIELD_SIZE]);
+        sim.set_player_enabled(true);
+        assert_eq!(sim.spray_vehicle(), 1, "on foot: refused");
+
+        sim.debug_spawn_traffic(3.0, 0.0, 0.0, 0);
+        sim.set_input(input::BTN_ENTER, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+        sim.step(SUBSTEP);
+        sim.set_input(0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+        sim.step(SUBSTEP);
+        assert!(sim.driving());
+
+        sim.add_heat(50.0); // 2 stars
+        let money = sim.player_money();
+        let idx = sim.driving.unwrap();
+        sim.vehicles[idx].hp = 30.0;
+        assert_eq!(sim.spray_vehicle(), 0);
+        assert_eq!(sim.player_money(), money - 100.0);
+        assert_eq!(sim.wanted_level(), 0);
+        assert!((sim.vehicles[idx].hp - 100.0).abs() < 1e-9);
+
+        sim.add_heat(100.0); // 3 stars
+        assert_eq!(sim.spray_vehicle(), 2, "too hot: refused");
+        sim.clear_wanted();
+        sim.stats.money = 40;
+        assert_eq!(sim.spray_vehicle(), 3, "broke: refused");
+    }
+
+    #[test]
+    fn try_charge_respects_balance() {
+        let mut sim = Sim::new(1, 0.0, 0.0);
+        let start = sim.player_money();
+        assert!(sim.try_charge(start - 1.0));
+        assert!(!sim.try_charge(1000.0));
+        assert_eq!(sim.player_money(), 1.0);
+        sim.give_armor(60.0);
+        assert!((sim.player_armor() - 60.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn odometers_accumulate_and_snapshot() {
+        let mut sim = Sim::new(1, 0.0, 0.0);
+        sim.load_heightfield(0, 0, -500.0, -500.0, 1000.0, &vec![0.0; FIELD_SIZE * FIELD_SIZE]);
+        sim.set_player_enabled(true);
+        for _ in 0..240 {
+            sim.step(SUBSTEP); // land the spawn drop first
+        }
+        sim.set_input(0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0);
+        for _ in 0..240 {
+            sim.step(SUBSTEP);
+        }
+        let walked = sim.stats_counters()[0];
+        assert!(walked > 5.0, "walked {walked:.1}m");
+
+        sim.set_input(0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+        sim.debug_spawn_traffic(sim.player_x() + 3.0, sim.player_z(), 0.0, 0);
+        sim.set_input(input::BTN_ENTER, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+        sim.step(SUBSTEP);
+        sim.set_input(0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0); // throttle
+        for _ in 0..240 {
+            sim.step(SUBSTEP);
+        }
+        let c = sim.stats_counters();
+        assert!(c[1] > 10.0, "drove {:.1}m", c[1]);
+        assert!((c[3] - 1.0).abs() < 1e-9, "carjack counted");
+
+        // Counters survive a snapshot round trip; a v1-style snapshot
+        // (truncated, version patched) still restores without them.
+        let mut snap = sim.snapshot();
+        assert!(sim.restore(&snap));
+        let c2 = sim.stats_counters();
+        assert!((c2[0] - c[0]).abs() < 1e-9 && (c2[3] - c[3]).abs() < 1e-9);
+        snap[0] = 1.0;
+        snap.truncate(19);
+        assert!(sim.restore(&snap), "v1 snapshots still load");
     }
 
     #[test]
