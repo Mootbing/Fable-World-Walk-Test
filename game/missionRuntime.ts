@@ -11,6 +11,9 @@ export type MissionStep =
   | { kind: "goTo"; x: number; z: number; radius: number; text: string }
   | { kind: "enterVehicle"; vehicleKey?: string; text: string }
   | { kind: "driveTo"; x: number; z: number; radius: number; text: string }
+  | { kind: "timedDriveTo"; x: number; z: number; radius: number; seconds: number; text: string }
+  | { kind: "eliminate"; pedKey: string; text: string }
+  | { kind: "destroyVehicle"; vehicleKey: string; text: string }
   | { kind: "loseWanted"; text: string };
 
 export interface MissionDef {
@@ -33,7 +36,12 @@ function loadDone(): Set<string> {
 }
 
 export class MissionRuntime {
-  private active: { def: MissionDef; step: number; ctx: Record<string, number> } | null = null;
+  private active: {
+    def: MissionDef;
+    step: number;
+    ctx: Record<string, number>;
+    deadline: number | null;
+  } | null = null;
   private done = loadDone();
   private flashTimer = 0;
 
@@ -52,7 +60,8 @@ export class MissionRuntime {
   start(def: MissionDef, engine: WorldEngine): boolean {
     if (this.active || this.done.has(def.id) || !engine.sim) return false;
     const ctx = def.setup(engine);
-    this.active = { def, step: 0, ctx };
+    engine.killedPeds.clear();
+    this.active = { def, step: 0, ctx, deadline: null };
     this.applyStep(engine);
     return true;
   }
@@ -74,6 +83,21 @@ export class MissionRuntime {
     }
 
     const step = act.def.steps[act.step];
+
+    // Timed steps: countdown in the objective line; expiry fails.
+    if (act.deadline !== null) {
+      const left = act.deadline - performance.now() / 1000;
+      if (left <= 0) {
+        this.finish(engine, false);
+        return;
+      }
+      const mm = Math.floor(left / 60);
+      const ss = String(Math.floor(left % 60)).padStart(2, "0");
+      useHud.setState({
+        mission: { title: act.def.title, objective: `${step.text} · ${mm}:${ss}` },
+      });
+    }
+
     let complete = false;
     switch (step.kind) {
       case "goTo": {
@@ -92,6 +116,20 @@ export class MissionRuntime {
         complete =
           engine.sim.driving() &&
           Math.hypot(engine.playerX - step.x, engine.playerZ - step.z) <= step.radius;
+        break;
+      }
+      case "timedDriveTo": {
+        complete =
+          engine.sim.driving() &&
+          Math.hypot(engine.playerX - step.x, engine.playerZ - step.z) <= step.radius;
+        break;
+      }
+      case "eliminate": {
+        complete = engine.killedPeds.has(act.ctx[step.pedKey]);
+        break;
+      }
+      case "destroyVehicle": {
+        complete = engine.isVehicleDestroyed(act.ctx[step.vehicleKey]);
         break;
       }
       case "loseWanted": {
@@ -113,6 +151,8 @@ export class MissionRuntime {
   private applyStep(engine: WorldEngine): void {
     const act = this.active!;
     const step = act.def.steps[act.step];
+    act.deadline =
+      step.kind === "timedDriveTo" ? performance.now() / 1000 + step.seconds : null;
     useHud.setState({
       mission: { title: act.def.title, objective: step.text },
     });

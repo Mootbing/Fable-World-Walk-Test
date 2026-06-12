@@ -23,6 +23,7 @@ pub const EV_RESPAWN: u32 = 10;
 pub const EV_PICKUP: u32 = 11;
 /// a = 1 hit / 0 whiff.
 pub const EV_PUNCH: u32 = 12;
+/// a = ped id.
 pub const EV_PED_KILLED: u32 = 13;
 /// a = hit kind (0 air, 1 building, 2 ped, 3 vehicle), b/c = hit x/z (f32).
 pub const EV_GUNSHOT: u32 = 14;

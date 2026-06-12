@@ -312,7 +312,7 @@ impl Peds {
         damage: f64,
         reach: f64,
         time: f64,
-    ) -> Option<(bool, f64, f64)> {
+    ) -> Option<(bool, f64, f64, u32)> {
         let (fx, fz) = (-(yaw.sin()), -(yaw.cos()));
         let mut best: Option<(usize, f64)> = None;
         for (i, p) in self.peds.iter().enumerate() {
@@ -334,9 +334,9 @@ impl Peds {
             }
         }
         let (i, _) = best?;
-        let (x, z) = (self.peds[i].x, self.peds[i].z);
+        let (x, z, id) = (self.peds[i].x, self.peds[i].z, self.peds[i].id);
         let killed = self.apply_damage(i, damage, (px, pz), time);
-        Some((killed, x, z))
+        Some((killed, x, z, id))
     }
 
     /// Knock down peds the vehicle body touches at speed; returns hits as

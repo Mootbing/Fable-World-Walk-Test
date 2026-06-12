@@ -598,6 +598,49 @@ test("boots from fixtures, sim ticks, player walks", async ({ page }) => {
     timeout: 5_000,
   });
 
+  // PR25: M02 assassination — find the mark, drop him, vanish.
+  expect(await page.evaluate(() => window.__ww!.cmd("startMission", "m02"))).toBe(true);
+  await page.evaluate(() => window.__ww!.cmd("warpPlayer", -20, -47));
+  await page.waitForFunction(
+    () => (window.__ww!.query("mission") as { step: number }).step >= 1,
+    undefined,
+    { timeout: 8_000 },
+  );
+  await page.evaluate(() => window.__ww!.cmd("giveWeapon", 2, 36)); // pistol refill
+  await page.evaluate(() => window.__ww!.cmd("equip", 2));
+  await page.evaluate(() => window.__ww!.cmd("warpPlayer", -20, -52)); // 3m north of the mark
+  for (let shot = 0; shot < 8; shot++) {
+    const m = (await page.evaluate(() => window.__ww!.query("mission"))) as { step: number };
+    if (m.step >= 2) break;
+    await page.evaluate(() => {
+      window.dispatchEvent(new MouseEvent("mousedown", { button: 2 }));
+      window.dispatchEvent(new MouseEvent("mousedown", { button: 0 }));
+    });
+    await page.waitForTimeout(700);
+    await page.evaluate(() => {
+      window.dispatchEvent(new MouseEvent("mouseup", { button: 0 }));
+      window.dispatchEvent(new MouseEvent("mouseup", { button: 2 }));
+    });
+    await page.waitForTimeout(700);
+  }
+  await page.waitForFunction(
+    () => (window.__ww!.query("mission") as { step: number }).step >= 2,
+    undefined,
+    { timeout: 5_000 },
+  );
+  const m02Money = (await page.evaluate(
+    () => (window.__ww!.query("stats") as { money: number }).money,
+  )) as number;
+  await page.evaluate(() => window.__ww!.cmd("clearWanted"));
+  await page.waitForFunction(
+    () => ((window.__ww!.query("mission") as { flash: string }).flash ?? "").includes("PASSED"),
+    undefined,
+    { timeout: 8_000 },
+  );
+  expect(
+    (await page.evaluate(() => (window.__ww!.query("stats") as { money: number }).money)) as number,
+  ).toBe(m02Money + 750);
+
   // World actually meshed: 9 terrain chunks alone are ~295k triangles, and
   // Times Square building tiles add meshes on top.
   const render = (await page.evaluate(() => window.__ww!.query("render"))) as {
