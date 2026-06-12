@@ -13,7 +13,8 @@ pub const KIND_VAN: u32 = 2;
 pub const KIND_TAXI: u32 = 3;
 pub const KIND_POLICE: u32 = 4;
 pub const KIND_SPORT: u32 = 5;
-pub const KIND_COUNT: u32 = 6;
+pub const KIND_BIKE: u32 = 6;
+pub const KIND_COUNT: u32 = 7;
 
 /// Per-class handling envelope. Mirrored (dimensions only) by the
 /// renderer's kit table in engine/render/vehicleKits.ts.
@@ -42,6 +43,8 @@ pub const SPECS: [VehicleSpec; KIND_COUNT as usize] = [
     VehicleSpec { accel: 9.0, brake: 16.0, max_speed: 44.0, max_reverse: 10.0, steer_max: 0.55, grip: 9.0, wheelbase: 2.75, half_length: 2.25, half_width: 0.93 },
     // sport — fast, planted
     VehicleSpec { accel: 11.0, brake: 17.0, max_speed: 52.0, max_reverse: 10.0, steer_max: 0.50, grip: 10.0, wheelbase: 2.5, half_length: 2.1, half_width: 0.95 },
+    // bike — quick, narrow, flickable
+    VehicleSpec { accel: 12.0, brake: 15.0, max_speed: 49.0, max_reverse: 5.0, steer_max: 0.62, grip: 9.5, wheelbase: 1.45, half_length: 1.1, half_width: 0.42 },
 ];
 
 pub fn spec(kind: u32) -> &'static VehicleSpec {
@@ -253,10 +256,48 @@ impl Vehicle {
                 (Some(r), Some(l)) => ((r - l) / (2.0 * hw)).atan(),
                 _ => 0.0,
             };
+            // Bikes lean into the corner on top of the slope roll.
+            let lean = if self.kind == KIND_BIKE {
+                -self.steer * (self.v_long.abs() / 12.0).min(1.0) * 0.95
+            } else {
+                0.0
+            };
             let k = (dt * 6.0).min(1.0);
             self.pitch += (target_pitch - self.pitch) * k;
-            self.roll += (target_roll - self.roll) * k;
+            self.roll += (target_roll + lean - self.roll) * k;
         }
+    }
+}
+
+#[cfg(test)]
+mod bike_tests {
+    use super::*;
+    use crate::collision::CollisionWorld;
+    use crate::events::Events;
+    use crate::terrain::{HeightGrid, FIELD_SIZE};
+
+    const DT: f64 = 1.0 / 60.0;
+
+    #[test]
+    fn bikes_lean_into_corners_cars_stay_flat() {
+        let mut hg = HeightGrid::new();
+        hg.load(0, 0, -500.0, -500.0, 1000.0, vec![0.0; FIELD_SIZE * FIELD_SIZE]);
+        let cw = CollisionWorld::new();
+        let mut ev = Events::new();
+        let input = DriveInput { throttle: 0.4, steer: 1.0, handbrake: false };
+
+        let roll_after_turn = |kind: u32, ev: &mut Events| {
+            let mut v = Vehicle::new(1, kind, 0, 0.0, 0.0, 0.0);
+            v.v_long = 20.0;
+            for _ in 0..90 {
+                v.substep(Some(&input), &hg, &cw, ev, 1.0, DT);
+            }
+            v.roll
+        };
+        let bike = roll_after_turn(KIND_BIKE, &mut ev);
+        let sedan = roll_after_turn(KIND_SEDAN, &mut ev);
+        assert!(bike.abs() > 0.18, "bike leans, roll = {bike:.2}");
+        assert!(sedan.abs() < 0.03, "sedan stays flat, roll = {sedan:.2}");
     }
 }
 

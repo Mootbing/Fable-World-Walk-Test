@@ -42,12 +42,28 @@ export function installTestHook(engine: WorldEngine): () => void {
           return { ...engine.camPos };
         case "avatarVisible":
           return engine.avatar.visible;
+        case "drivingKind":
+          return engine.sim?.drivingKind() ?? 0;
         case "driving":
           return engine.sim ? engine.sim.driving() : false;
         case "weapon":
           return engine.sim ? engine.sim.weaponState() : null;
         case "radio":
           return { station: engine.audio.station, name: engine.audio.stationName };
+        case "lean": {
+          // Roll component of the driven vehicle's entity quat.
+          if (!engine.sim) return 0;
+          const want = engine.sim.drivingVehicleId();
+          if (want === 0) return 0;
+          const ef = engine.sim.entityView();
+          const eu = engine.sim.entityViewU32();
+          for (let b = 0; b < eu.length; b += 16) {
+            if (eu[b + 13] >>> 16 === 2 && eu[b + 12] === want) {
+              return Math.hypot(ef[b + 3], ef[b + 5]); // roll+pitch magnitude, yaw-proof
+            }
+          }
+          return 0;
+        }
         case "pedRender":
           return engine.pedPools.lastCount;
         case "audio":

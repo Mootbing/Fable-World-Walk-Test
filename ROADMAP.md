@@ -288,7 +288,7 @@ Dev server runs on **port 3001** (3000 belongs to another app on this machine).
 
 ## Phase 7 — Parity gap-fill & stretch
 
-- [ ] **PR34 `feat: motorcycles`** — lean visuals, fall-off on impact.
+- [x] **PR34 `feat: motorcycles`** — lean visuals, fall-off on impact.
 - [ ] **PR35 `feat: water, swimming, boats`** — `water` layer planes, swim
   mode, boat class at coastlines.
 - [ ] **PR36 `feat: helicopters + wanted 5–6★`** — simplified heli flight,

@@ -13,6 +13,8 @@ export class PlayerAvatar {
   readonly group = new THREE.Group();
   /** Two-hand raise while the aim cam is up (set from the rig). */
   aiming = false;
+  /** Seated-on-bike pose (knees up, arms to the bars). */
+  riding = false;
 
   private torso: THREE.Group;
   private leftArm: THREE.Group;
@@ -94,7 +96,7 @@ export class PlayerAvatar {
     const punch = entities[LANE.aux0];
     const grounded = (entitiesU32[LANE.stateFlags] & STATE_FLAG.grounded) !== 0;
 
-    this.group.position.set(x, y - 1.7, z);
+    this.group.position.set(x, y - 1.7 + (this.riding ? 0.42 : 0), z);
     this.quat.set(
       entities[LANE.quatX],
       entities[LANE.quatY],
@@ -103,6 +105,16 @@ export class PlayerAvatar {
     );
     this.group.quaternion.copy(this.quat);
 
+    if (this.riding) {
+      this.leftLeg.rotation.x = -1.15;
+      this.rightLeg.rotation.x = -1.15;
+      this.leftArm.rotation.x = -0.8;
+      this.rightArm.rotation.x = -0.8;
+      this.leftArm.rotation.z = -0.18;
+      this.rightArm.rotation.z = 0.18;
+      this.torso.position.y = 0;
+      return;
+    }
     if (this.aiming) {
       // Two-handed stance toward the camera yaw.
       this.leftArm.rotation.x = -1.45;

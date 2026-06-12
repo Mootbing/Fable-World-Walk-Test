@@ -704,6 +704,11 @@ export class WorldEngine {
     }
   }
 
+  /** Player is on the bike (kind 6): the avatar stays visible, seated. */
+  get ridingBike(): boolean {
+    return this.driveState !== null && this.sim?.drivingKind() === 6;
+  }
+
   /** Any siren-flagged vehicle within earshot of the player? */
   private sirenNearby(): boolean {
     if (!this.sim) return false;
