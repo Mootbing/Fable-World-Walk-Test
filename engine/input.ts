@@ -27,6 +27,8 @@ export interface InputFrame {
   toggleRoadDebug: boolean;
   /** Weapon slot requested via Digit1-5 this frame, or null. */
   equipSlot: number | null;
+  /** T edge: start/cancel a vehicle side activity. */
+  toggleActivity: boolean;
 }
 
 const SENSITIVITY = 0.0022;
@@ -45,6 +47,7 @@ export class InputManager {
   private toggleEdge = false;
   private roadDebugEdge = false;
   private equipEdge: number | null = null;
+  private activityEdge = false;
   private element: HTMLElement | null = null;
   private detachFns: (() => void)[] = [];
 
@@ -63,6 +66,7 @@ export class InputManager {
       this.keys[e.code] = true;
       if (e.code === "KeyV" && !e.repeat && this.locked()) this.toggleEdge = true;
       if (e.code === "KeyG" && !e.repeat && this.locked()) this.roadDebugEdge = true;
+      if (e.code === "KeyT" && !e.repeat && this.locked()) this.activityEdge = true;
       if (e.code === "Tab") {
         e.preventDefault(); // keep focus; Tab is the weapon wheel
         if (!e.repeat && this.locked()) useHud.setState({ wheelOpen: true });
@@ -144,12 +148,14 @@ export class InputManager {
       toggleCamera: this.toggleEdge,
       toggleRoadDebug: this.roadDebugEdge,
       equipSlot: this.equipEdge,
+      toggleActivity: this.activityEdge,
     };
     this.yawAcc = 0;
     this.pitchAcc = 0;
     this.toggleEdge = false;
     this.roadDebugEdge = false;
     this.equipEdge = null;
+    this.activityEdge = false;
     return frame;
   }
 }

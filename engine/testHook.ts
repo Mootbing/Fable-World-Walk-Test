@@ -46,6 +46,14 @@ export function installTestHook(engine: WorldEngine): () => void {
           return engine.sim ? engine.sim.driving() : false;
         case "weapon":
           return engine.sim ? engine.sim.weaponState() : null;
+        case "activity": {
+          const a = engine.activities.active;
+          return a
+            ? a.type === "taxi"
+              ? { type: a.type, stage: a.stage, target: a.target, fares: a.fares }
+              : { type: a.type, targetId: a.targetId, bounties: a.bounties }
+            : null;
+        }
         case "mission":
           return {
             active: engine.missions.activeMissionId,
@@ -169,6 +177,9 @@ export function installTestHook(engine: WorldEngine): () => void {
           engine.sim?.equipWeapon(id);
           return true;
         }
+        case "toggleActivity":
+          engine.activities.toggle(engine);
+          return engine.activities.active?.type ?? null;
         case "startMission": {
           const [id] = args as [string];
           const def = MISSIONS.find((m) => m.id === id) ?? MISSIONS[0];

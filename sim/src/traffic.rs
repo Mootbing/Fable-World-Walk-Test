@@ -165,6 +165,68 @@ impl Traffic {
         false
     }
 
+    /// Force-spawn a marked roaming car near the player (vigilante
+    /// targets); returns its id.
+    pub fn spawn_marked_car(
+        &mut self,
+        graph: &RoadGraph,
+        player: (f64, f64),
+        rng: &mut Pcg32,
+    ) -> Option<u32> {
+        // Scan every edge for midpoints inside the annulus — random
+        // probing whiffs when qualifying edges are a small share of a
+        // multi-kilometer graph.
+        let candidates: Vec<usize> = graph
+            .edges
+            .iter()
+            .enumerate()
+            .filter_map(|(id, e)| {
+                let edge = e.as_ref()?;
+                if edge.class == 6 || edge.len < 25.0 {
+                    return None;
+                }
+                let mid = sample_polyline(&edge.points, edge.len * 0.5);
+                let d = ((mid.0 - player.0).powi(2) + (mid.1 - player.1).powi(2)).sqrt();
+                (60.0..=300.0).contains(&d).then_some(id)
+            })
+            .collect();
+        if candidates.is_empty() {
+            return None;
+        }
+        let id = candidates[rng.next_below(candidates.len() as u32) as usize];
+        let edge = graph.edges[id].as_ref().unwrap();
+        let s = edge.len * 0.5;
+        let (px, pz, tx, tz) = sample_polyline(&edge.points, s);
+        let (rx, rz) = (-tz, tx);
+        let car_id = self.next_id;
+        self.next_id += 1;
+        self.cars.push(TrafficCar {
+            id: car_id,
+            kind: 5, // sport: the getaway look
+            paint: rng.next_below(8),
+            edge: id as u32,
+            s,
+            speed: edge.speed,
+            x: px + rx * LANE_OFFSET,
+            y: 0.0,
+            z: pz + rz * LANE_OFFSET,
+            yaw: (-tx).atan2(-tz),
+            steer: 0.0,
+            wheel_spin: 0.0,
+            next_edge: None,
+            smooth_ground: None,
+            prev_yaw: 0.0,
+            stopped_since: None,
+            creeping: false,
+            braking: false,
+            hp: 100.0,
+            husk: false,
+            husk_until: 0.0,
+            pursuit: false,
+        });
+        Some(car_id)
+    }
+
     /// Spawn a parked car off the graph at an exact spot (tests, setups).
     pub fn debug_spawn_at(&mut self, x: f64, z: f64, yaw: f64, kind: u32, paint: u32) -> u32 {
         let id = self.next_id;
@@ -822,6 +884,24 @@ mod tests {
             t.substep(&g, &hg, (10_000.0, 0.0), None, &[], &mut rng, 10.0 + step as f64 * DT, DT);
         }
         assert_eq!(t.count(), 0);
+    }
+
+    #[test]
+    fn marked_car_spawns_in_annulus() {
+        let g = grid_graph();
+        let mut t = Traffic::new();
+        let mut rng = Pcg32::new(7);
+        // Deterministic across seeds: candidate scan, not random probing.
+        for seed in 0..20 {
+            let mut r = Pcg32::new(seed);
+            let id = t.spawn_marked_car(&g, (0.0, 0.0), &mut r).expect("candidate edge");
+            let car = t.cars.iter().find(|c| c.id == id).unwrap();
+            assert_eq!(car.kind, 5);
+            let d = (car.x * car.x + car.z * car.z).sqrt();
+            assert!((50.0..=320.0).contains(&d), "marked car at {d:.0}m");
+        }
+        // Far from any road: graceful None.
+        assert!(t.spawn_marked_car(&g, (50_000.0, 0.0), &mut rng).is_none());
     }
 
     #[test]

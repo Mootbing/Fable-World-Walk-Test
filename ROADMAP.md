@@ -267,7 +267,7 @@ Dev server runs on **port 3001** (3000 belongs to another app on this machine).
   delivery). Scoped from 5 to 4 total missions; escort/race archetypes
   deferred to the activities PRs. *Verified:* 69 Rust tests; smoke plays
   M02 end-to-end (id-verified kill, $750 banked).
-- [ ] **PR26 `feat: taxi + vigilante side activities`** — routed fares with
+- [x] **PR26 `feat: taxi + vigilante side activities`** — routed fares with
   timer/payout chains; criminal-vehicle takedowns in police cars.
 - [ ] **PR27 `feat: pay'n'spray + weapon shop + stats screen`** — `car_repair`
   POIs clear wanted ≤2★ + repair; buy menu; pause stats page.

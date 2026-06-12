@@ -51,6 +51,7 @@ function Scene({
         strafe: frame.strafe,
         toggleRoadDebug: frame.toggleRoadDebug,
         equipSlot: frame.equipSlot,
+        toggleActivity: frame.toggleActivity,
       },
       dt,
     );

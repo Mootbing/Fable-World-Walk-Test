@@ -279,6 +279,14 @@ export class SimBridge {
     };
   }
 
+  removePed(id: number): boolean {
+    return this.sim.remove_ped(id);
+  }
+
+  spawnMarkedCar(): number {
+    return this.sim.spawn_marked_car();
+  }
+
   /** Spawn a stationary ped (debug/tests). */
   debugSpawnPed(x: number, z: number): number {
     return this.sim.debug_spawn_ped(x, z);

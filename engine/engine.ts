@@ -19,6 +19,7 @@ import { extractRoadTile, RoadTile } from "./roads";
 import { extractPlaces, extractPois, resolveArea, Place, Poi } from "./places";
 import type { CameraClamp } from "./render/cameraRig";
 import { MissionRuntime } from "@/game/missionRuntime";
+import { Activities } from "@/game/activities";
 import { MISSIONS } from "@/game/missions";
 import { useHud } from "./store";
 
@@ -43,6 +44,7 @@ export interface MoveInput {
   strafe: number;
   toggleRoadDebug: boolean;
   equipSlot: number | null;
+  toggleActivity: boolean;
 }
 
 const DIFF_INTERVAL = 0.25;
@@ -103,6 +105,7 @@ export class WorldEngine {
   /** Per-frame driving snapshot for the chase cam + HUD. */
   driveState: { yaw: number; speed: number } | null = null;
   readonly missions = new MissionRuntime();
+  readonly activities = new Activities();
   /** Ped ids killed since the last mission start (eliminate objectives). */
   readonly killedPeds = new Set<number>();
   private marker: THREE.Mesh;
@@ -377,6 +380,8 @@ export class WorldEngine {
     this.buildings.processBuildQueue();
     this.updateGps(dt);
     this.missions.update(this, dt);
+    if (input.toggleActivity) this.activities.toggle(this);
+    this.activities.update(this);
 
     // Mission start corona: the M01 marker waits near spawn.
     const nextMission = MISSIONS.find((m) => !this.missions.isDone(m.id));
@@ -493,6 +498,21 @@ export class WorldEngine {
     },
     sampleGround: (x, z) => this.heights.sample(x, z),
   };
+
+  upsertBlip(id: string, x: number, z: number, color: string): void {
+    const existing = this.blips.find((b) => b.id === id);
+    if (existing) {
+      existing.x = x;
+      existing.z = z;
+    } else {
+      this.blips.push({ id, x, z, color });
+    }
+  }
+
+  removeBlip(id: string): void {
+    const idx = this.blips.findIndex((b) => b.id === id);
+    if (idx >= 0) this.blips.splice(idx, 1);
+  }
 
   /** Destroyed = husk flag set, or gone from the entity buffer. */
   isVehicleDestroyed(id: number): boolean {
