@@ -27,6 +27,7 @@ pub struct Player {
     pub grounded: bool,
     /// Distance walked, drives the render-side gait phase.
     pub gait: f64,
+    pub swimming: bool,
     last_ground: Option<f64>,
     smooth_ground: Option<f64>,
 }
@@ -42,6 +43,7 @@ impl Player {
             enabled: false,
             grounded: true,
             gait: 0.0,
+            swimming: false,
             last_ground: None,
             smooth_ground: None,
         }
@@ -62,11 +64,22 @@ impl Player {
         heights: &HeightGrid,
         collision: &CollisionWorld,
         events: &mut Events,
+        water: Option<f64>,
         dt: f64,
     ) -> Option<f64> {
+        // Swim when standing water covers the spot and we're down at its
+        // level (bridge decks above the river stay dry).
+        let swim_level = match water {
+            Some(lvl) if self.y - EYE_HEIGHT < lvl + 0.35 => Some(lvl),
+            _ => None,
+        };
+        self.swimming = swim_level.is_some();
+
         let moving = input.move_len() > 1e-6;
         if self.enabled && moving {
-            let speed = if input.is_down(BTN_SPRINT) {
+            let speed = if self.swimming {
+                if input.is_down(BTN_SPRINT) { 3.2 } else { 2.2 }
+            } else if input.is_down(BTN_SPRINT) {
                 SPRINT_SPEED
             } else {
                 WALK_SPEED
@@ -82,6 +95,16 @@ impl Player {
             self.z = rz;
             self.gait += step;
             self.yaw = (-(input.move_x as f64)).atan2(-(input.move_z as f64));
+        }
+        if let Some(lvl) = swim_level {
+            // Tread water: eye rides just above the surface, no gravity,
+            // no jump, and the drop into the water never counts as a fall.
+            let target = lvl + 0.55;
+            self.y += (target - self.y) * (dt * 6.0).min(1.0);
+            self.vel_y = 0.0;
+            self.grounded = false;
+            self.smooth_ground = Some(lvl - 1.0);
+            return None;
         }
         self.update_vertical(input, events, heights, dt)
     }
@@ -168,7 +191,7 @@ mod tests {
         let cw = CollisionWorld::new();
         let idle = Input::default();
         for _ in 0..120 {
-            p.substep(&idle, hg, &cw, &mut ev, DT);
+            p.substep(&idle, hg, &cw, &mut ev, None, DT);
         }
         ev.clear();
         (p, ev)
@@ -191,13 +214,13 @@ mod tests {
         let cw = CollisionWorld::new();
         let mut input = Input::default();
         input.buttons = BTN_JUMP;
-        p.substep(&input, &hg, &cw, &mut ev, DT); // rising edge -> jump
+        p.substep(&input, &hg, &cw, &mut ev, None, DT); // rising edge -> jump
         input.tick(); // latch prev_buttons
 
         let mut apex: f64 = p.y;
         let mut landed_at = 0;
         for i in 0..240 {
-            p.substep(&input, &hg, &cw, &mut ev, DT);
+            p.substep(&input, &hg, &cw, &mut ev, None, DT);
             apex = apex.max(p.y);
             if p.grounded {
                 landed_at = i;
@@ -235,7 +258,7 @@ mod tests {
         let cw = CollisionWorld::new();
         let idle = Input::default();
         for _ in 0..240 {
-            p.substep(&idle, &hg, &cw, &mut ev, DT);
+            p.substep(&idle, &hg, &cw, &mut ev, None, DT);
         }
         assert!((p.y - (50.0 + EYE_HEIGHT)).abs() < 0.1);
 
@@ -245,7 +268,7 @@ mod tests {
         input.move_x = 1.0;
         let mut fell = false;
         for _ in 0..2400 {
-            p.substep(&input, &hg, &cw, &mut ev, DT);
+            p.substep(&input, &hg, &cw, &mut ev, None, DT);
             input.tick();
             if !p.grounded {
                 fell = true;
@@ -281,7 +304,7 @@ mod tests {
         input.buttons = BTN_SPRINT;
         input.move_x = 1.0; // sprint east into the wall
         for _ in 0..600 {
-            p.substep(&input, &hg, &cw, &mut ev, DT);
+            p.substep(&input, &hg, &cw, &mut ev, None, DT);
             input.tick();
         }
         assert!(p.x <= 5.0 - RADIUS + 0.02, "penetrated to x={}", p.x);

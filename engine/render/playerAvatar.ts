@@ -95,6 +95,7 @@ export class PlayerAvatar {
     const phase = entities[LANE.animPhase];
     const punch = entities[LANE.aux0];
     const grounded = (entitiesU32[LANE.stateFlags] & STATE_FLAG.grounded) !== 0;
+    const swimming = (entitiesU32[LANE.stateFlags] & 512) !== 0;
 
     this.group.position.set(x, y - 1.7 + (this.riding ? 0.42 : 0), z);
     this.quat.set(
@@ -105,6 +106,17 @@ export class PlayerAvatar {
     );
     this.group.quaternion.copy(this.quat);
 
+    if (swimming) {
+      // Freestyle: body low, legs trailing, arms alternating strokes.
+      const stroke = Math.sin(phase * Math.PI * 2);
+      this.leftLeg.rotation.x = 1.35 + stroke * 0.15;
+      this.rightLeg.rotation.x = 1.35 - stroke * 0.15;
+      this.leftArm.rotation.x = 1.2 + stroke * 1.4;
+      this.rightArm.rotation.x = 1.2 - stroke * 1.4;
+      this.torso.position.y = -0.55;
+      return;
+    }
+    this.torso.position.y = 0;
     if (this.riding) {
       this.leftLeg.rotation.x = -1.15;
       this.rightLeg.rotation.x = -1.15;
