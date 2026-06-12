@@ -23,6 +23,7 @@ import { Activities } from "@/game/activities";
 import { Shops } from "@/game/shops";
 import { computeDayState, createDayState } from "./render/dayNight";
 import { WeatherFx } from "./render/weatherFx";
+import { AudioEngine } from "./audio";
 import { MISSIONS } from "@/game/missions";
 import { useHud } from "./store";
 
@@ -100,6 +101,8 @@ export class WorldEngine {
   /** Current lit-window opacity (observability for tests). */
   windowGlowOpacity = 0;
   readonly weatherFx = new WeatherFx();
+  readonly audio = new AudioEngine();
+  private thunderPending = false;
   /** Fog near/far multiplier from weather (World.tsx applies it). */
   fogScale = 1;
   /** Lightning flash 0..1, decays fast; whitens the sky in storms. */
@@ -327,12 +330,24 @@ export class WorldEngine {
     this.fogScale = [1, 0.8, 0.45, 0.3][weather];
     this.weatherFx.intensity = weather === 2 ? 0.55 : weather === 3 ? 1 : 0;
     this.weatherFx.update(dt, this.camPos.x, this.camPos.y, this.camPos.z);
-    if (weather === 3 && Math.random() < dt * 0.25) this.flash = 1;
+    if (weather === 3 && Math.random() < dt * 0.25) {
+      this.flash = 1;
+      this.thunderPending = true;
+    }
     this.flash = Math.max(0, this.flash - dt * 5);
     if (this.flash > 0) {
       this.dayState.sky.lerp(FLASH_WHITE, this.flash * 0.8);
       this.dayState.dirIntensity += this.flash * 1.6;
     }
+    if (!this.audio.unlocked && useHud.getState().locked) this.audio.unlock();
+    this.audio.update({
+      driving: this.driveState !== null,
+      speed: this.sim?.drivingSpeed() ?? 0,
+      sirenNear: this.sirenNearby(),
+      rainIntensity: this.weatherFx.intensity,
+      thunder: this.thunderPending,
+    });
+    this.thunderPending = false;
     const night = this.dayState.daylight < 0.35;
     this.vehiclePools.night = night;
     this.windowGlowOpacity = Math.max(0, 1 - this.dayState.daylight * 2.2) * 0.95;
@@ -391,6 +406,7 @@ export class WorldEngine {
 
       const events = this.sim.drainEvents();
       if (events.length > 0) {
+        this.audio.handleEvents(events);
         for (let i = 0; i < events.length; i += 4) {
           if (events[i] === 13) this.killedPeds.add(events[i + 1]);
           if (events[i] === 20) {
@@ -677,8 +693,23 @@ export class WorldEngine {
     }
   }
 
+  /** Any siren-flagged vehicle within earshot of the player? */
+  private sirenNearby(): boolean {
+    if (!this.sim) return false;
+    const f32 = this.sim.entityView();
+    const u32 = this.sim.entityViewU32();
+    for (let base = 0; base < u32.length; base += 16) {
+      if (u32[base + 13] >>> 16 !== 2 || (u32[base + 14] & 256) === 0) continue;
+      const dx = f32[base] - this.playerX;
+      const dz = f32[base + 2] - this.playerZ;
+      if (dx * dx + dz * dz < 130 * 130) return true;
+    }
+    return false;
+  }
+
   dispose(): void {
     this.disposed = true;
+    this.audio.dispose();
     this.chunks.disposeAll();
     this.buildings.disposeAll();
     this.marker.geometry.dispose();

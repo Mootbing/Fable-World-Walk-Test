@@ -876,6 +876,29 @@ test("boots from fixtures, sim ticks, player walks", async ({ page }) => {
     { timeout: 5_000 },
   );
 
+  // PR31: audio — context unlocks on pointer lock, sim events schedule
+  // voices (count grows even if headless keeps the context suspended).
+  const au0 = (await page.evaluate(() => window.__ww!.query("audio"))) as {
+    unlocked: boolean;
+    voices: number;
+    state: string;
+  };
+  expect(au0.unlocked).toBe(true);
+  expect(au0.voices).toBeGreaterThan(0); // the whole suite has been noisy
+  const p31 = (await page.evaluate(() => window.__ww!.query("player"))) as {
+    x: number;
+    z: number;
+  };
+  await page.evaluate(
+    ([x, z]) => window.__ww!.cmd("spawnPickup", x, z, 0, 10), // health chime
+    [p31.x, p31.z] as [number, number],
+  );
+  await page.waitForFunction(
+    (v) => (window.__ww!.query("audio") as { voices: number }).voices > v,
+    au0.voices,
+    { timeout: 8_000 },
+  );
+
   // World actually meshed: 9 terrain chunks alone are ~295k triangles, and
   // Times Square building tiles add meshes on top.
   const render = (await page.evaluate(() => window.__ww!.query("render"))) as {
