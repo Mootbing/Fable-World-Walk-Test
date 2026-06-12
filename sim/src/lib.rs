@@ -94,6 +94,10 @@ pub struct Sim {
     packages_collected: std::collections::HashSet<u32>,
     /// Slots seeded per loaded road tile (for the spawned tally on unload).
     package_tiles: std::collections::HashMap<(i32, i32), u32>,
+    /// Weather: 0 clear, 1 overcast, 2 rain, 3 storm. Seeded Markov
+    /// transitions every 2-6 game hours.
+    weather: u32,
+    weather_next: f64,
     /// Lifetime tallies for the stats screen.
     dist_walked: f64,
     dist_driven: f64,
@@ -145,6 +149,8 @@ impl Sim {
             packages_spawned: 0,
             packages_collected: std::collections::HashSet::new(),
             package_tiles: std::collections::HashMap::new(),
+            weather: 0,
+            weather_next: 240.0,
             dist_walked: 0.0,
             dist_driven: 0.0,
             peds_killed: 0,
@@ -591,6 +597,52 @@ impl Sim {
         self.wanted.add_heat(amount, &mut self.events);
     }
 
+    pub fn weather(&self) -> u32 {
+        self.weather
+    }
+
+    /// Debug/test/scripting: force a weather state now.
+    pub fn set_weather(&mut self, w: u32) {
+        let w = w.min(3);
+        if w != self.weather {
+            self.weather = w;
+            self.events.push(events::EV_WEATHER, w, 0, 0);
+        }
+        self.weather_next = self.time + 120.0 + self.rng.next_below(240) as f64;
+    }
+
+    /// Grip multiplier for the current sky (1 = dry).
+    pub fn weather_grip(&self) -> f64 {
+        match self.weather {
+            2 => 0.55,
+            3 => 0.45,
+            _ => 1.0,
+        }
+    }
+
+    fn tick_weather(&mut self) {
+        if self.time < self.weather_next {
+            return;
+        }
+        // Markov row per state: candidate next states by weight /100.
+        let roll = self.rng.next_below(100);
+        let next = match self.weather {
+            0 => {
+                if roll < 65 { 0 } else if roll < 90 { 1 } else { 2 }
+            }
+            1 => {
+                if roll < 35 { 0 } else if roll < 65 { 1 } else { 2 }
+            }
+            2 => {
+                if roll < 30 { 1 } else if roll < 70 { 2 } else { 3 }
+            }
+            _ => {
+                if roll < 55 { 2 } else { 3 }
+            }
+        };
+        self.set_weather(next);
+    }
+
     pub fn weapons_owned(&self) -> u32 {
         self.weapons.owned_mask()
     }
@@ -935,11 +987,13 @@ impl Sim {
                 steer: self.input.axis_strafe as f64,
                 handbrake: self.input.is_down(input::BTN_JUMP),
             };
+            let wet_grip = self.weather_grip();
             self.vehicles[i].substep(
                 Some(&drive),
                 &self.heights,
                 &self.collision,
                 &mut self.events,
+                wet_grip,
                 SUBSTEP,
             );
             // Player rides along (seated eye a bit above the deck).
@@ -975,6 +1029,7 @@ impl Sim {
             }
         }
 
+        self.tick_weather();
         self.update_vehicle_damage();
 
         for (kind, value) in self.pickups.collect(
@@ -996,11 +1051,13 @@ impl Sim {
             if Some(i) == self.driving {
                 continue;
             }
+            let wet_grip = self.weather_grip();
             self.vehicles[i].substep(
                 None,
                 &self.heights,
                 &self.collision,
                 &mut self.events,
+                wet_grip,
                 SUBSTEP,
             );
         }
@@ -1913,6 +1970,77 @@ mod tests {
             .find(|p| p.id == victim)
             .is_none_or(|p| p.dead);
         assert!(dead, "victim should be dead after three post-respawn punches");
+    }
+
+    #[test]
+    fn rain_lengthens_braking_and_slides() {
+        // Braking from speed: wet stop takes meaningfully longer.
+        let stop_dist = |grip: f64| {
+            let hg = {
+                let mut h = terrain::HeightGrid::new();
+                h.load(0, 0, -500.0, -500.0, 1000.0, vec![0.0; FIELD_SIZE * FIELD_SIZE]);
+                h
+            };
+            let cw = collision::CollisionWorld::new();
+            let mut ev = events::Events::new();
+            let mut v = vehicle::Vehicle::new(1, vehicle::KIND_SEDAN, 0, 0.0, 0.0, 0.0);
+            v.v_long = 30.0;
+            let throttle_brake = vehicle::DriveInput { throttle: -1.0, steer: 0.0, handbrake: false };
+            let mut steps = 0;
+            while v.v_long > 0.5 && steps < 6000 {
+                v.substep(Some(&throttle_brake), &hg, &cw, &mut ev, grip, SUBSTEP);
+                steps += 1;
+            }
+            (v.z.abs().max(v.x.abs()), v.x.hypot(v.z))
+        };
+        let (_, dry) = stop_dist(1.0);
+        let (_, wet) = stop_dist(0.45);
+        assert!(wet > dry * 1.15, "wet {wet:.1}m vs dry {dry:.1}m");
+
+        // Cornering at speed: lower grip keeps more lateral slip alive.
+        let slide = |grip: f64| {
+            let hg = {
+                let mut h = terrain::HeightGrid::new();
+                h.load(0, 0, -500.0, -500.0, 1000.0, vec![0.0; FIELD_SIZE * FIELD_SIZE]);
+                h
+            };
+            let cw = collision::CollisionWorld::new();
+            let mut ev = events::Events::new();
+            let mut v = vehicle::Vehicle::new(1, vehicle::KIND_SEDAN, 0, 0.0, 0.0, 0.0);
+            v.v_long = 24.0;
+            let turn = vehicle::DriveInput { throttle: 0.3, steer: 1.0, handbrake: false };
+            let mut max_lat: f64 = 0.0;
+            for _ in 0..90 {
+                v.substep(Some(&turn), &hg, &cw, &mut ev, grip, SUBSTEP);
+                max_lat = max_lat.max(v.v_lat.abs());
+            }
+            max_lat
+        };
+        assert!(slide(0.45) > slide(1.0) * 1.3, "wet corners slide more");
+    }
+
+    #[test]
+    fn weather_markov_stays_valid_and_moves() {
+        let mut sim = Sim::new(11, 0.0, 0.0);
+        sim.load_heightfield(0, 0, -500.0, -500.0, 1000.0, &vec![0.0; FIELD_SIZE * FIELD_SIZE]);
+        sim.set_player_enabled(true);
+        assert_eq!(sim.weather(), 0);
+        assert!((sim.weather_grip() - 1.0).abs() < 1e-9);
+
+        let mut seen = std::collections::HashSet::new();
+        // ~40 game-days; transitions every 120-360s of sim time.
+        for _ in 0..400 {
+            sim.weather_next = sim.time; // force the next roll
+            sim.step(SUBSTEP);
+            assert!(sim.weather() <= 3);
+            seen.insert(sim.weather());
+        }
+        assert!(seen.len() >= 3, "visited {seen:?}");
+
+        sim.set_weather(2);
+        assert!((sim.weather_grip() - 0.55).abs() < 1e-9);
+        sim.set_weather(9); // clamps
+        assert_eq!(sim.weather(), 3);
     }
 
     #[test]

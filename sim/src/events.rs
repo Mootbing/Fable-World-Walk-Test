@@ -36,6 +36,8 @@ pub const EV_WANTED_CHANGED: u32 = 18;
 pub const EV_BUSTED: u32 = 19;
 /// Hidden package collected: a = lifetime found count.
 pub const EV_PACKAGE: u32 = 20;
+/// Weather changed: a = new state (0 clear, 1 overcast, 2 rain, 3 storm).
+pub const EV_WEATHER: u32 = 21;
 
 pub const EVENT_WORDS: usize = 4;
 const MAX_EVENTS: usize = 256;

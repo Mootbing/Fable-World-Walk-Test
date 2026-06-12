@@ -292,6 +292,19 @@ export class SimBridge {
     this.sim.give_armor(amount);
   }
 
+  /** 0 clear, 1 overcast, 2 rain, 3 storm. */
+  weather(): number {
+    return this.sim.weather();
+  }
+
+  setWeather(w: number): void {
+    this.sim.set_weather(w);
+  }
+
+  weatherGrip(): number {
+    return this.sim.weather_grip();
+  }
+
   packagesFound(): number {
     return this.sim.packages_found();
   }

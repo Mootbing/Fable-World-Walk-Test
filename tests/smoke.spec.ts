@@ -851,6 +851,31 @@ test("boots from fixtures, sim ticks, player walks", async ({ page }) => {
   await page.screenshot({ path: "test-results/night.png" });
   await page.evaluate(() => window.__ww!.cmd("setClock", 12 * 60)); // back to noon
 
+  // PR30: weather — rain drops grip and visibility, particles fall.
+  await page.evaluate(() => window.__ww!.cmd("setWeather", 2)); // rain
+  await page.waitForFunction(
+    () => {
+      const w = window.__ww!.query("weather") as {
+        state: number;
+        grip: number;
+        fogScale: number;
+        drops: number;
+      };
+      return w.state === 2 && w.grip < 0.6 && w.fogScale < 0.5 && w.drops > 100;
+    },
+    undefined,
+    { timeout: 5_000 },
+  );
+  await page.evaluate(() => window.__ww!.cmd("setWeather", 0)); // clear up
+  await page.waitForFunction(
+    () => {
+      const w = window.__ww!.query("weather") as { state: number; grip: number; drops: number };
+      return w.state === 0 && w.grip === 1 && w.drops === 0;
+    },
+    undefined,
+    { timeout: 5_000 },
+  );
+
   // World actually meshed: 9 terrain chunks alone are ~295k triangles, and
   // Times Square building tiles add meshes on top.
   const render = (await page.evaluate(() => window.__ww!.query("render"))) as {

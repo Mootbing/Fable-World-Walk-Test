@@ -70,7 +70,13 @@ function Scene({
     // Clock-driven lighting (engine.dayState is recomputed in update()).
     const ds = engine.dayState;
     if (scene.background instanceof THREE.Color) scene.background.copy(ds.sky);
-    if (scene.fog) scene.fog.color.copy(ds.sky);
+    if (scene.fog) {
+      scene.fog.color.copy(ds.sky);
+      if (scene.fog instanceof THREE.Fog) {
+        scene.fog.near = CONFIG.fogNear * engine.fogScale;
+        scene.fog.far = CONFIG.fogFar * Math.max(engine.fogScale, 0.45);
+      }
+    }
     if (hemiRef.current) hemiRef.current.intensity = ds.hemiIntensity;
     if (dirRef.current) {
       dirRef.current.intensity = ds.dirIntensity;
