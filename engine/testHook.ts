@@ -50,6 +50,8 @@ export function installTestHook(engine: WorldEngine): () => void {
           return engine.sim ? engine.sim.weaponState() : null;
         case "radio":
           return { station: engine.audio.station, name: engine.audio.stationName };
+        case "policeHeli":
+          return engine.sim?.policeHeliActive() ?? false;
         case "swim":
           return engine.sim?.isSwimming() ?? false;
         case "water":

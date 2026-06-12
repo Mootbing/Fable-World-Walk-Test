@@ -291,6 +291,7 @@ mod tests {
         cw.add_tile(
             (0, 0),
             vec![crate::collision::Footprint {
+                top: f64::MAX,
                 rings: vec![vec![
                     [5.0, -50.0],
                     [60.0, -50.0],

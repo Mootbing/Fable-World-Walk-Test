@@ -205,7 +205,7 @@ export class WorldEngine {
 
     // ...and so does every live building tile's walkable footprint set.
     this.buildings.onTileBuildings = (tx, ty, features) => {
-      const flat = flattenFootprints(features);
+      const flat = flattenFootprints(features, (x, z) => this.heights.sample(x, z));
       if (this.sim) {
         this.sim.loadTileBuildings(tx, ty, flat);
       } else {

@@ -7,20 +7,35 @@ export interface FlatFootprints {
   coords: Float32Array;
   ringOffsets: Uint32Array;
   featOffsets: Uint32Array;
+  /** Absolute roof height per feature (helicopters fly above them). */
+  tops: Float32Array;
 }
 
 /**
  * Flatten parsed building features for upload, keeping only footprints that
  * block walking (elevated structures like skybridges don't).
  */
-export function flattenFootprints(buildings: BuildingFeature[]): FlatFootprints {
+export function flattenFootprints(
+  buildings: BuildingFeature[],
+  groundAt?: (x: number, z: number) => number | null,
+): FlatFootprints {
   const walkBlocking = buildings.filter((b) => b.minHeight <= 2.5);
   const coords: number[] = [];
   const ringOffsets: number[] = [];
   const featOffsets: number[] = [];
+  const tops: number[] = [];
   let vertex = 0;
   for (const b of walkBlocking) {
     featOffsets.push(ringOffsets.length);
+    let ground = Infinity;
+    if (groundAt) {
+      for (const [x, z] of b.rings[0] ?? []) {
+        const h = groundAt(x, z);
+        if (h !== null && h < ground) ground = h;
+      }
+    }
+    if (!Number.isFinite(ground)) ground = 0;
+    tops.push(ground + b.height);
     for (const ring of b.rings) {
       ringOffsets.push(vertex);
       for (const [x, z] of ring) {
@@ -35,6 +50,7 @@ export function flattenFootprints(buildings: BuildingFeature[]): FlatFootprints 
     coords: new Float32Array(coords),
     ringOffsets: new Uint32Array(ringOffsets),
     featOffsets: new Uint32Array(featOffsets),
+    tops: new Float32Array(tops),
   };
 }
 
@@ -76,7 +92,7 @@ export class SimBridge {
   }
 
   loadTileBuildings(tx: number, ty: number, flat: FlatFootprints): void {
-    this.sim.load_tile_buildings(tx, ty, flat.coords, flat.ringOffsets, flat.featOffsets);
+    this.sim.load_tile_buildings(tx, ty, flat.coords, flat.ringOffsets, flat.featOffsets, flat.tops);
   }
 
   unloadTileBuildings(tx: number, ty: number): void {
@@ -321,6 +337,10 @@ export class SimBridge {
 
   spawnBoat(x: number, z: number): number {
     return this.sim.spawn_boat(x, z);
+  }
+
+  policeHeliActive(): boolean {
+    return this.sim.police_heli_active();
   }
 
   /** 0 clear, 1 overcast, 2 rain, 3 storm. */
