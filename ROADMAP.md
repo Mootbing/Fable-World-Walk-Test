@@ -233,8 +233,19 @@ Dev server runs on **port 3001** (3000 belongs to another app on this machine).
   smoke sees ≥10 real POIs streamed.
 ## Phase 5 — Missions & progression
 
-- [ ] **PR23 `feat: save/load + pause menu + settings`** — localStorage slots
-  (position/money/weapons/flags/clock), Esc pause menu, settings.
+- [x] **PR23 `feat: save/load + pause menu + settings`** — sim
+  `snapshot()/restore()` (flat versioned f64: pos/health/armor/money/
+  arsenal; restore snaps to ground via `reset_vertical`, clears wanted);
+  3 localStorage slots (`engine/save.ts`: sim snapshot + clock +
+  waypoint, metadata listing); Esc pause menu replaces the start overlay
+  post-start (Resume/Save/Load per slot, sensitivity + invert-Y settings
+  read live by the input layer); harness overhaul: **all synthetic mouse
+  input now uses awaited down/up dispatches** (page-side setTimeout
+  releases starve under load → stuck buttons → missing edges — found via
+  spawn-vs-respawn probe bisection). *Verified:* 69 Rust tests (snapshot
+  round trip, version rejection, post-respawn melee regression); smoke
+  saves → trashes state → loads → position/money/health restored, pause
+  menu screenshot.
 - [ ] **PR24 `feat: mission framework + first mission`** — data-driven
   objective graphs, marker coronas, fail/reward, sim command API.
 - [ ] **PR25 `feat: mission pack v1 — five-mission arc`** — courier, chase,

@@ -1,4 +1,5 @@
 import { useHud, LOCK_EVENT } from "./store";
+import { getSettings } from "./settings";
 
 /** One frame of consumed input; deltas are reset by each frame() call. */
 export interface InputFrame {
@@ -100,14 +101,16 @@ export class InputManager {
     });
     on(window, "mousemove", (e: MouseEvent) => {
       if (!document.pointerLockElement) return;
-      this.yawAcc -= e.movementX * SENSITIVITY;
-      this.pitchAcc -= e.movementY * SENSITIVITY;
+      const s = getSettings();
+      this.yawAcc -= e.movementX * SENSITIVITY * s.sensitivity;
+      this.pitchAcc -= e.movementY * SENSITIVITY * s.sensitivity * (s.invertY ? -1 : 1);
     });
     on(window, LOCK_EVENT, () => {
       this.element?.requestPointerLock();
     });
     on(document, "pointerlockchange", () => {
-      useHud.setState({ locked: document.pointerLockElement === this.element });
+      const locked = document.pointerLockElement === this.element;
+      useHud.setState(locked ? { locked, started: true } : { locked });
     });
   }
 

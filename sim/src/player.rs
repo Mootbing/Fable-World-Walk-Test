@@ -48,6 +48,14 @@ impl Player {
     }
 
     /// Returns the landing impact speed when this substep touched down.
+    /// Forget ground history: next sample snaps (teleports/loads).
+    pub fn reset_vertical(&mut self) {
+        self.smooth_ground = None;
+        self.last_ground = None;
+        self.vel_y = 0.0;
+        self.grounded = true;
+    }
+
     pub fn substep(
         &mut self,
         input: &Input,

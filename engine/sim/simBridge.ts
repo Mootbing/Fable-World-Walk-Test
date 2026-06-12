@@ -109,6 +109,14 @@ export class SimBridge {
     return this.sim.poi_count();
   }
 
+  snapshot(): Float64Array {
+    return this.sim.snapshot();
+  }
+
+  restore(data: Float64Array): boolean {
+    return this.sim.restore(data);
+  }
+
   roadStats(): { edges: number; nodes: number; connectivity: number } {
     return {
       edges: this.sim.road_edge_count(),

@@ -7,6 +7,8 @@ interface HudState {
   /** Spawn area loaded enough to walk. */
   ready: boolean;
   locked: boolean;
+  /** Player has locked in at least once (start screen → pause menu). */
+  started: boolean;
   lat: number;
   lon: number;
   elev: number;
@@ -48,6 +50,7 @@ interface HudState {
 export const useHud = create<HudState>(() => ({
   ready: false,
   locked: false,
+  started: false,
   lat: 0,
   lon: 0,
   elev: 0,
