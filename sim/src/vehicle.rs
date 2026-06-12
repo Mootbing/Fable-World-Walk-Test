@@ -14,7 +14,8 @@ pub const KIND_TAXI: u32 = 3;
 pub const KIND_POLICE: u32 = 4;
 pub const KIND_SPORT: u32 = 5;
 pub const KIND_BIKE: u32 = 6;
-pub const KIND_COUNT: u32 = 7;
+pub const KIND_BOAT: u32 = 7;
+pub const KIND_COUNT: u32 = 8;
 
 /// Per-class handling envelope. Mirrored (dimensions only) by the
 /// renderer's kit table in engine/render/vehicleKits.ts.
@@ -45,6 +46,8 @@ pub const SPECS: [VehicleSpec; KIND_COUNT as usize] = [
     VehicleSpec { accel: 11.0, brake: 17.0, max_speed: 52.0, max_reverse: 10.0, steer_max: 0.50, grip: 10.0, wheelbase: 2.5, half_length: 2.1, half_width: 0.95 },
     // bike — quick, narrow, flickable
     VehicleSpec { accel: 12.0, brake: 15.0, max_speed: 49.0, max_reverse: 5.0, steer_max: 0.62, grip: 9.5, wheelbase: 1.45, half_length: 1.1, half_width: 0.42 },
+    // boat — loose, drifty, water-clamped by the sim
+    VehicleSpec { accel: 6.0, brake: 6.0, max_speed: 24.0, max_reverse: 4.0, steer_max: 0.5, grip: 3.5, wheelbase: 3.0, half_length: 2.7, half_width: 1.15 },
 ];
 
 pub fn spec(kind: u32) -> &'static VehicleSpec {

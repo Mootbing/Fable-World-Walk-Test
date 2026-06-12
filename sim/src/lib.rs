@@ -14,7 +14,8 @@ pub mod stats;
 pub mod terrain;
 pub mod traffic;
 pub mod wanted;
-pub mod weapons;
+pub mod water;
+mod weapons;
 pub mod vehicle;
 
 use collision::{CollisionWorld, Footprint};
@@ -88,6 +89,7 @@ pub struct Sim {
     roadblock_timer: f64,
     /// (kind, x, z) per tile: 0 hospital, 1 police (respawn anchors).
     pois: std::collections::HashMap<(i32, i32), Vec<(u32, f64, f64)>>,
+    water: water::Water,
     /// Hidden packages: lifetime found count and collected stable ids.
     packages_found: u32,
     packages_spawned: u32,
@@ -145,6 +147,7 @@ impl Sim {
             force_timer: 0.0,
             roadblock_timer: 0.0,
             pois: std::collections::HashMap::new(),
+            water: water::Water::new(),
             packages_found: 0,
             packages_spawned: 0,
             packages_collected: std::collections::HashSet::new(),
@@ -388,6 +391,61 @@ impl Sim {
         self.peds.dismiss_cops(self.time);
         self.traffic.end_pursuits();
         true
+    }
+
+    /// Water polygons for one tile: flat coords + ring sizes + rings/poly.
+    pub fn load_water(
+        &mut self,
+        tx: i32,
+        ty: i32,
+        coords: &[f32],
+        ring_sizes: &[u32],
+        poly_ring_counts: &[u32],
+    ) {
+        let mut polys = Vec::with_capacity(poly_ring_counts.len());
+        let mut ring_idx = 0usize;
+        let mut v = 0usize;
+        for &nrings in poly_ring_counts {
+            let mut rings = Vec::with_capacity(nrings as usize);
+            for _ in 0..nrings {
+                let size = ring_sizes[ring_idx] as usize;
+                ring_idx += 1;
+                let ring: Vec<(f64, f64)> = (0..size)
+                    .map(|k| (coords[(v + k) * 2] as f64, coords[(v + k) * 2 + 1] as f64))
+                    .collect();
+                v += size;
+                rings.push(ring);
+            }
+            polys.push(rings);
+        }
+        self.water.load_tile((tx, ty), polys);
+    }
+
+    pub fn unload_water(&mut self, tx: i32, ty: i32) {
+        self.water.unload_tile((tx, ty));
+    }
+
+    pub fn water_count(&self) -> u32 {
+        self.water.poly_count()
+    }
+
+    /// [x, z] of the nearest swimmable point to the player, or empty.
+    pub fn water_probe(&self) -> Vec<f64> {
+        self.water
+            .probe_near(self.player.x, self.player.z, &self.heights)
+            .map_or(Vec::new(), |(x, z)| vec![x, z])
+    }
+
+    pub fn is_swimming(&self) -> bool {
+        self.player.swimming
+    }
+
+    /// Drop a boat on the water at (x,z); 0 if that spot is dry.
+    pub fn spawn_boat(&mut self, x: f64, z: f64) -> u32 {
+        if self.water.level_at(x, z, &self.heights).is_none() {
+            return 0;
+        }
+        self.spawn_vehicle(x, z, 0.0, vehicle::KIND_BOAT)
     }
 
     pub fn poi_count(&self) -> u32 {
@@ -1008,11 +1066,13 @@ impl Sim {
             self.player.yaw = v.yaw;
         } else {
             let (wx, wz) = (self.player.x, self.player.z);
+            let water = self.water.level_at(self.player.x, self.player.z, &self.heights);
             let impact = self.player.substep(
                 &self.input,
                 &self.heights,
                 &self.collision,
                 &mut self.events,
+                water,
                 SUBSTEP,
             );
             if let Some(impact) = impact {
@@ -1026,6 +1086,27 @@ impl Sim {
             if moved < 5.0 {
                 // Warps/respawns don't count as cardio.
                 self.dist_walked += moved;
+            }
+        }
+
+        // Boats float: clamp to the water surface, run aground on land.
+        for i in 0..self.vehicles.len() {
+            if self.vehicles[i].kind != vehicle::KIND_BOAT {
+                continue;
+            }
+            let (bx, bz) = (self.vehicles[i].x, self.vehicles[i].z);
+            let lvl = self.water.level_at(bx, bz, &self.heights);
+            let v = &mut self.vehicles[i];
+            match lvl {
+                Some(l) => {
+                    v.y = l + 0.1;
+                    v.pitch *= 0.85;
+                    v.roll *= 0.85;
+                }
+                None => v.v_long *= 0.97, // running aground bleeds speed
+            }
+            if Some(i) == self.driving {
+                self.player.y = v.y + 1.3;
             }
         }
 
@@ -1606,6 +1687,9 @@ impl Sim {
         if driving.is_some() {
             flags |= FLAG_IN_VEHICLE;
         }
+        if self.player.swimming {
+            flags |= 512; // FLAG_SWIMMING
+        }
         let e = &mut self.entities[0..ENTITY_STRIDE];
         e[0] = p.x as f32;
         e[1] = p.y as f32;
@@ -1970,6 +2054,57 @@ mod tests {
             .find(|p| p.id == victim)
             .is_none_or(|p| p.dead);
         assert!(dead, "victim should be dead after three post-respawn punches");
+    }
+
+    #[test]
+    fn swims_in_water_and_boats_float() {
+        let mut sim = Sim::new(3, 0.0, 0.0);
+        sim.load_heightfield(0, 0, -500.0, -500.0, 1000.0, &vec![2.0; FIELD_SIZE * FIELD_SIZE]);
+        // A 200m square pond east of spawn.
+        let ring: Vec<f32> = [(40.0, -100.0), (240.0, -100.0), (240.0, 100.0), (40.0, 100.0)]
+            .iter()
+            .flat_map(|&(x, z): &(f32, f32)| [x, z])
+            .collect();
+        sim.load_water(0, 0, &ring, &[4], &[1]);
+        assert_eq!(sim.water_count(), 1);
+        sim.set_player_enabled(true);
+        for _ in 0..120 {
+            sim.step(SUBSTEP); // settle on land
+        }
+        assert!(!sim.is_swimming());
+
+        sim.set_player_pos(100.0, 0.0); // mid-pond
+        sim.set_input(0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0); // paddle east
+        for _ in 0..240 {
+            sim.step(SUBSTEP);
+        }
+        assert!(sim.is_swimming());
+        assert!((sim.player_y() - 2.55).abs() < 0.3, "treads at the surface, y={}", sim.player_y());
+        let x0 = sim.player_x();
+        for _ in 0..120 {
+            sim.step(SUBSTEP);
+        }
+        let swam = sim.player_x() - x0;
+        assert!(swam > 2.0 && swam < 8.0, "swim speed is slow, moved {swam:.1}m");
+
+        // Boat: floats at the surface, drives, runs aground at the bank.
+        assert_eq!(sim.spawn_boat(0.0, 0.0), 0, "dry land refuses a boat");
+        let boat = sim.spawn_boat(sim.player_x() + 2.2, 0.0);
+        assert!(boat > 0);
+        sim.set_input(input::BTN_ENTER, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+        sim.step(SUBSTEP);
+        sim.set_input(0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0);
+        for _ in 0..240 {
+            sim.step(SUBSTEP);
+        }
+        assert!(sim.driving());
+        assert_eq!(sim.driving_kind(), vehicle::KIND_BOAT);
+        let vy = self_boat_y(&sim);
+        assert!((vy - 2.1).abs() < 0.2, "hull rides the surface, y={vy:.2}");
+    }
+
+    fn self_boat_y(sim: &Sim) -> f64 {
+        sim.vehicles.iter().find(|v| v.kind == vehicle::KIND_BOAT).map(|v| v.y).unwrap()
     }
 
     #[test]

@@ -35,4 +35,5 @@ export const KITS: VehicleKit[] = [
   { name: "Police Cruiser", width: 1.85, length: 4.5, bodyH: 0.55, cabinW: 1.65, cabinH: 0.5, cabinLen: 2.1, cabinZ: 0.25, wheelbase: 2.75, track: 1.56, paint: 0xf2f2f2, topper: 0xd2222a },
   { name: "Sport", width: 1.85, length: 4.2, bodyH: 0.45, cabinW: 1.6, cabinH: 0.42, cabinLen: 1.7, cabinZ: 0.35, wheelbase: 2.5, track: 1.58, paint: null, topper: null },
   { name: "Bike", width: 0.55, length: 2.2, bodyH: 0.42, cabinW: 0.32, cabinH: 0.24, cabinLen: 0.55, cabinZ: -0.25, wheelbase: 1.45, track: 0, paint: null, topper: null },
+  { name: "Boat", width: 2.2, length: 5.4, bodyH: 0.55, cabinW: 1.3, cabinH: 0.6, cabinLen: 1.4, cabinZ: -0.6, wheelbase: 0, track: 0, paint: 0xf0ece2, topper: null },
 ];

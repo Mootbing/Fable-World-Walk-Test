@@ -152,7 +152,9 @@ export class VehiclePools {
       const spin = f32[base + LANE.animPhase];
       const steer = f32[base + LANE.aux0];
       const wheelSpots: [number, number, boolean][] =
-        kit.track === 0
+        kit.wheelbase === 0
+          ? [] // boats
+          : kit.track === 0
           ? [
               // Bikes: one wheel each end on the centerline.
               [0, -kit.wheelbase / 2, true],

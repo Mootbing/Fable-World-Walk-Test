@@ -994,6 +994,67 @@ test("boots from fixtures, sim ticks, player walks", async ({ page }) => {
     timeout: 5_000,
   });
 
+  // PR35: water — real Hudson polygons, swimming, and a boat ride.
+  const land35 = (await page.evaluate(() => window.__ww!.query("player"))) as {
+    x: number;
+    z: number;
+  };
+  const w35 = (await page.evaluate(() => window.__ww!.query("water"))) as {
+    polys: number;
+    probe: number[];
+  };
+  expect(w35.polys).toBeGreaterThan(0);
+  expect(w35.probe.length).toBe(2);
+  await page.evaluate(
+    ([x, z]) => window.__ww!.cmd("warpPlayer", x, z),
+    [w35.probe[0], w35.probe[1]] as [number, number],
+  );
+  await page.waitForFunction(() => window.__ww!.query("swim") === true, undefined, {
+    timeout: 8_000,
+  });
+  const boat35 = (await page.evaluate(
+    ([x, z]) => window.__ww!.cmd("spawnBoat", x + 2.0, z),
+    [w35.probe[0], w35.probe[1]] as [number, number],
+  )) as number;
+  expect(boat35).toBeGreaterThan(0);
+  await page.evaluate(() => window.__ww!.press("KeyE", 250));
+  await page.waitForFunction(() => window.__ww!.query("driving") === true, undefined, {
+    timeout: 5_000,
+  });
+  expect(await page.evaluate(() => window.__ww!.query("drivingKind"))).toBe(7);
+  const aboard = (await page.evaluate(() => window.__ww!.query("player"))) as {
+    x: number;
+    z: number;
+  };
+  let sailed = 0;
+  for (let i = 0; i < 6 && sailed < 5; i++) {
+    await page.evaluate(() =>
+      window.dispatchEvent(new KeyboardEvent("keydown", { code: "KeyW", bubbles: true })),
+    );
+    await page.waitForTimeout(1200);
+    await page.evaluate(() =>
+      window.dispatchEvent(new KeyboardEvent("keyup", { code: "KeyW", bubbles: true })),
+    );
+    const p = (await page.evaluate(() => window.__ww!.query("player"))) as {
+      x: number;
+      z: number;
+    };
+    sailed = Math.hypot(p.x - aboard.x, p.z - aboard.z);
+  }
+  expect(sailed).toBeGreaterThan(5);
+  await page.evaluate(() => window.__ww!.press("KeyE", 250));
+  await page.waitForFunction(() => window.__ww!.query("driving") === false, undefined, {
+    timeout: 5_000,
+  });
+  await page.screenshot({ path: "test-results/water.png" });
+  await page.evaluate(
+    ([x, z]) => window.__ww!.cmd("warpPlayer", x, z),
+    [land35.x, land35.z] as [number, number],
+  );
+  await page.waitForFunction(() => window.__ww!.query("swim") === false, undefined, {
+    timeout: 8_000,
+  });
+
   // World actually meshed: 9 terrain chunks alone are ~295k triangles, and
   // Times Square building tiles add meshes on top.
   const render = (await page.evaluate(() => window.__ww!.query("render"))) as {

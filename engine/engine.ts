@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { CONFIG } from "./config";
 import { WorldAnchor } from "./geo";
 import { FetchQueue } from "./fetchQueue";
@@ -25,6 +26,7 @@ import { computeDayState, createDayState } from "./render/dayNight";
 import { WeatherFx } from "./render/weatherFx";
 import { AudioEngine } from "./audio";
 import { getSettings, updateSettings } from "./settings";
+import { extractWater, flattenWater, WaterPoly } from "./water";
 import { MISSIONS } from "@/game/missions";
 import { useHud } from "./store";
 
@@ -131,6 +133,14 @@ export class WorldEngine {
   totalBounties = 0;
   /** TS-side POI registry per tile (sim holds its own copy). */
   readonly poiTiles = new Map<string, Poi[]>();
+  private pendingWater = new Map<string, { tx: number; ty: number; polys: WaterPoly[] }>();
+  private waterMeshes = new Map<string, THREE.Mesh>();
+  private waterGroup = new THREE.Group();
+  private waterMaterial = new THREE.MeshLambertMaterial({
+    color: 0x1b3a52,
+    transparent: true,
+    opacity: 0.85,
+  });
   private injectedPois = 0;
   /** Ped ids killed since the last mission start (eliminate objectives). */
   readonly killedPeds = new Set<number>();
@@ -174,6 +184,7 @@ export class WorldEngine {
       this.pickupPools.group,
       this.fx.group,
       this.weatherFx.group,
+      this.waterGroup,
     );
 
     // Every decoded heightfield mirrors into the sim (queued until boot).
@@ -220,6 +231,12 @@ export class WorldEngine {
         if (this.sim) this.uploadPois(tx, ty, pois);
         else this.pendingPois.set(`${tx}/${ty}`, { tx, ty, pois });
       }
+      const waterPolys = extractWater(buf, tx, ty, CONFIG.buildingZoom, this.anchor);
+      if (waterPolys.length > 0) {
+        this.buildWaterMesh(tx, ty, waterPolys);
+        if (this.sim) this.uploadWater(tx, ty, waterPolys);
+        else this.pendingWater.set(`${tx}/${ty}`, { tx, ty, polys: waterPolys });
+      }
       const roads = extractRoadTile(buf, tx, ty, CONFIG.buildingZoom, this.anchor);
       if (!roads) return;
       this.roadTiles.set(`${tx}/${ty}`, roads);
@@ -234,6 +251,14 @@ export class WorldEngine {
       this.pendingPois.delete(`${tx}/${ty}`);
       this.poiTiles.delete(`${tx}/${ty}`);
       this.sim?.unloadPois(tx, ty);
+      this.pendingWater.delete(`${tx}/${ty}`);
+      this.sim?.unloadWater(tx, ty);
+      const wm = this.waterMeshes.get(`${tx}/${ty}`);
+      if (wm) {
+        this.waterGroup.remove(wm);
+        wm.geometry.dispose();
+        this.waterMeshes.delete(`${tx}/${ty}`);
+      }
       if (!this.roadTiles.delete(`${tx}/${ty}`)) return;
       if (this.sim) {
         this.sim.unloadTileRoads(tx, ty);
@@ -260,6 +285,63 @@ export class WorldEngine {
 
     this.group.add(this.roadDebug.group);
     void this.bootSim();
+  }
+
+  private uploadWater(tx: number, ty: number, polys: WaterPoly[]): void {
+    const flat = flattenWater(polys);
+    this.sim?.loadWater(tx, ty, flat.coords, flat.ringSizes, flat.polyRingCounts);
+  }
+
+  /** Translucent surface sheet per tile, one merged mesh. */
+  private buildWaterMesh(tx: number, ty: number, polys: WaterPoly[]): void {
+    const key = `${tx}/${ty}`;
+    if (this.waterMeshes.has(key)) return;
+    const nw = this.anchor.tileNWWorld(tx, ty, CONFIG.buildingZoom);
+    const geos: THREE.BufferGeometry[] = [];
+    for (const p of polys) {
+      const shape = new THREE.Shape();
+      const ext = p.rings[0];
+      shape.moveTo(ext[0][0] - nw.x, -(ext[0][1] - nw.z));
+      for (let i = 1; i < ext.length; i++) {
+        shape.lineTo(ext[i][0] - nw.x, -(ext[i][1] - nw.z));
+      }
+      for (let r = 1; r < p.rings.length; r++) {
+        const path = new THREE.Path();
+        const hole = p.rings[r];
+        path.moveTo(hole[0][0] - nw.x, -(hole[0][1] - nw.z));
+        for (let i = 1; i < hole.length; i++) {
+          path.lineTo(hole[i][0] - nw.x, -(hole[i][1] - nw.z));
+        }
+        shape.holes.push(path);
+      }
+      let geo: THREE.BufferGeometry;
+      try {
+        geo = new THREE.ShapeGeometry(shape);
+      } catch {
+        continue;
+      }
+      geo.rotateX(-Math.PI / 2);
+      // Surface level: lowest DEM sample on the exterior ring (the DEM
+      // reads the water surface itself), nudged up to bury bank seams.
+      let level = Infinity;
+      for (const [wx, wz] of ext) {
+        const h = this.heights.sample(wx, wz);
+        if (h !== null && h < level) level = h;
+      }
+      if (!Number.isFinite(level)) level = 0;
+      geo.translate(0, level + 0.12, 0);
+      geos.push(geo);
+    }
+    if (geos.length === 0) return;
+    const merged = mergeGeometries(geos, false);
+    for (const g of geos) g.dispose();
+    if (!merged) return;
+    const mesh = new THREE.Mesh(merged, this.waterMaterial);
+    mesh.position.set(nw.x, 0, nw.z);
+    mesh.matrixAutoUpdate = false;
+    mesh.updateMatrix();
+    this.waterGroup.add(mesh);
+    this.waterMeshes.set(key, mesh);
   }
 
   private uploadPois(tx: number, ty: number, pois: Poi[]): void {
@@ -307,6 +389,10 @@ export class WorldEngine {
         this.uploadPois(p.tx, p.ty, p.pois);
       }
       this.pendingPois.clear();
+      for (const w of this.pendingWater.values()) {
+        this.uploadWater(w.tx, w.ty, w.polys);
+      }
+      this.pendingWater.clear();
       const avgMs = sim.benchmark(1000);
       console.info(
         `[sim] v${SimBridge.version} booted · 1k-entity readback ${avgMs.toFixed(3)} ms/pass`,

@@ -292,6 +292,37 @@ export class SimBridge {
     this.sim.give_armor(amount);
   }
 
+  loadWater(
+    tx: number,
+    ty: number,
+    coords: Float32Array,
+    ringSizes: Uint32Array,
+    polyRingCounts: Uint32Array,
+  ): void {
+    this.sim.load_water(tx, ty, coords, ringSizes, polyRingCounts);
+  }
+
+  unloadWater(tx: number, ty: number): void {
+    this.sim.unload_water(tx, ty);
+  }
+
+  waterCount(): number {
+    return this.sim.water_count();
+  }
+
+  /** [x, z] of some in-water point, or []. */
+  waterProbe(): number[] {
+    return Array.from(this.sim.water_probe() as Float64Array);
+  }
+
+  isSwimming(): boolean {
+    return this.sim.is_swimming();
+  }
+
+  spawnBoat(x: number, z: number): number {
+    return this.sim.spawn_boat(x, z);
+  }
+
   /** 0 clear, 1 overcast, 2 rain, 3 storm. */
   weather(): number {
     return this.sim.weather();
