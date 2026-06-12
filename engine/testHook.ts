@@ -48,6 +48,8 @@ export function installTestHook(engine: WorldEngine): () => void {
           return engine.sim ? engine.sim.weaponState() : null;
         case "radio":
           return { station: engine.audio.station, name: engine.audio.stationName };
+        case "pedRender":
+          return engine.pedPools.lastCount;
         case "audio":
           return {
             state: engine.audio.ctxState,
