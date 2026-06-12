@@ -97,6 +97,18 @@ export class SimBridge {
     this.sim.unload_tile_roads(tx, ty);
   }
 
+  loadPois(tx: number, ty: number, kinds: Uint32Array, coords: Float32Array): void {
+    this.sim.load_pois(tx, ty, kinds, coords);
+  }
+
+  unloadPois(tx: number, ty: number): void {
+    this.sim.unload_pois(tx, ty);
+  }
+
+  poiCount(): number {
+    return this.sim.poi_count();
+  }
+
   roadStats(): { edges: number; nodes: number; connectivity: number } {
     return {
       edges: this.sim.road_edge_count(),

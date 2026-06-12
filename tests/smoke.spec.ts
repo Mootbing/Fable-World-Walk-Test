@@ -510,6 +510,12 @@ test("boots from fixtures, sim ticks, player walks", async ({ page }) => {
   });
   await page.evaluate(() => window.__ww!.cmd("warpPlayer", 0, 0));
 
+  // PR22: real POIs streamed into the sim — midtown's tile carries dozens
+  // of hospitals + precincts (death/busted respawn anchors).
+  await page.waitForFunction(() => (window.__ww!.query("pois") as number) >= 10, undefined, {
+    timeout: 10_000,
+  });
+
   // World actually meshed: 9 terrain chunks alone are ~295k triangles, and
   // Times Square building tiles add meshes on top.
   const render = (await page.evaluate(() => window.__ww!.query("render"))) as {

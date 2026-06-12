@@ -85,6 +85,9 @@ pub struct Sim {
     weapons: weapons::Weapons,
     wanted: wanted::Wanted,
     force_timer: f64,
+    roadblock_timer: f64,
+    /// (kind, x, z) per tile: 0 hospital, 1 police (respawn anchors).
+    pois: std::collections::HashMap<(i32, i32), Vec<(u32, f64, f64)>>,
     events: Events,
     /// Preallocated at MAX_ENTITIES so the pointer never moves (no wasm
     /// memory growth from the entity buffer itself).
@@ -124,6 +127,8 @@ impl Sim {
             weapons: weapons::Weapons::new(),
             wanted: wanted::Wanted::new(),
             force_timer: 0.0,
+            roadblock_timer: 0.0,
+            pois: std::collections::HashMap::new(),
             events: Events::new(),
             entities: vec![0.0; MAX_ENTITIES * ENTITY_STRIDE],
             entity_count: 1, // entity 0 is always the player
@@ -211,6 +216,40 @@ impl Sim {
             lines.push((pts, roads::unpack_attr(line_attrs[li])));
         }
         self.roads.load_tile((tx, ty), &lines);
+    }
+
+    /// POIs for one tile: flat kinds + xz pairs.
+    pub fn load_pois(&mut self, tx: i32, ty: i32, kinds: &[u32], coords: &[f32]) {
+        let list = kinds
+            .iter()
+            .enumerate()
+            .map(|(i, k)| (*k, coords[i * 2] as f64, coords[i * 2 + 1] as f64))
+            .collect();
+        self.pois.insert((tx, ty), list);
+    }
+
+    pub fn unload_pois(&mut self, tx: i32, ty: i32) {
+        self.pois.remove(&(tx, ty));
+    }
+
+    pub fn poi_count(&self) -> u32 {
+        self.pois.values().map(|v| v.len() as u32).sum()
+    }
+
+    fn nearest_poi(&self, kind: u32, x: f64, z: f64) -> Option<(f64, f64)> {
+        let mut best: Option<(f64, f64, f64)> = None;
+        for list in self.pois.values() {
+            for (k, px, pz) in list {
+                if *k != kind {
+                    continue;
+                }
+                let d2 = (px - x).powi(2) + (pz - z).powi(2);
+                if best.is_none_or(|(_, _, b)| d2 < b) {
+                    best = Some((*px, *pz, d2));
+                }
+            }
+        }
+        best.map(|(px, pz, _)| (px, pz))
     }
 
     pub fn unload_tile_roads(&mut self, tx: i32, ty: i32) {
@@ -538,10 +577,13 @@ impl Sim {
         // Death: ignore the world until the respawn timer brings us back.
         if self.stats.dead {
             if self.stats.tick_respawn(SUBSTEP, &mut self.events) {
-                // Wake up at the spawn point, on foot, broke-r.
+                // Wake up outside the nearest (real!) hospital.
+                let (hx, hz) = self
+                    .nearest_poi(0, self.player.x, self.player.z)
+                    .unwrap_or((self.spawn_x, self.spawn_z));
                 self.driving = None;
-                self.player.x = self.spawn_x;
-                self.player.z = self.spawn_z;
+                self.player.x = hx;
+                self.player.z = hz;
                 self.player.grounded = true;
                 self.wanted.clear(&mut self.events);
                 self.peds.dismiss_cops(self.time);
@@ -821,9 +863,12 @@ impl Sim {
         if self.wanted.busted {
             self.wanted.busted_hold -= SUBSTEP;
             if self.wanted.busted_hold <= 0.0 {
+                let (px, pz) = self
+                    .nearest_poi(1, self.player.x, self.player.z)
+                    .unwrap_or((self.spawn_x + 45.0, self.spawn_z + 45.0));
                 self.driving = None;
-                self.player.x = self.spawn_x + 45.0;
-                self.player.z = self.spawn_z + 45.0;
+                self.player.x = px;
+                self.player.z = pz;
                 self.player.grounded = true;
                 self.weapons = weapons::Weapons::new();
                 self.stats.add_money(-wanted::BUSTED_FINE);
@@ -854,6 +899,22 @@ impl Sim {
             return;
         }
 
+        // 4 stars: roadblocks ahead — two cruisers across a nearby street
+        // with armed cops behind them.
+        if self.wanted.level >= 4 {
+            self.roadblock_timer += SUBSTEP;
+            let active = self
+                .traffic
+                .cars
+                .iter()
+                .filter(|c| c.pursuit && c.edge == u32::MAX && !c.husk)
+                .count() as u32;
+            if self.roadblock_timer >= 6.0 && active < 4 {
+                self.roadblock_timer = 0.0;
+                self.spawn_roadblock();
+            }
+        }
+
         // Maintain the response force at a gentle cadence.
         self.force_timer += SUBSTEP;
         if self.force_timer >= 1.5 {
@@ -876,6 +937,45 @@ impl Sim {
     fn player_speed_slow(&self) -> bool {
         // On foot the sim is positional; treat "not actively moving" as slow.
         self.input.move_len() < 0.1
+    }
+
+    /// Park two cruisers nose-to-nose across a road edge 100-200m out,
+    /// with a pair of armed officers covering them.
+    fn spawn_roadblock(&mut self) {
+        let total = self.roads.edges.len();
+        if total == 0 {
+            return;
+        }
+        for _ in 0..40 {
+            let id = self.rng.next_below(total as u32) as usize;
+            let Some(edge) = self.roads.edges[id].as_ref() else { continue };
+            if edge.class == 6 || edge.len < 25.0 {
+                continue;
+            }
+            let s = edge.len * 0.5;
+            let (cx, cz, tx, tz) = roads::sample_polyline(&edge.points, s);
+            let d = ((cx - self.player.x).powi(2) + (cz - self.player.z).powi(2)).sqrt();
+            if !(100.0..=200.0).contains(&d) {
+                continue;
+            }
+            let (rx, rz) = (-tz, tx);
+            // Cruisers angled across the carriageway.
+            let block_yaw = (-tx).atan2(-tz) + std::f64::consts::FRAC_PI_2;
+            for side in [-1.6, 1.6] {
+                let car_id = self
+                    .traffic
+                    .debug_spawn_at(cx + rx * side, cz + rz * side, block_yaw, 4, 0);
+                let _ = car_id;
+            }
+            // Mark them as police (sirens) — debug_spawn_at made civilians.
+            for c in self.traffic.cars.iter_mut().rev().take(2) {
+                c.pursuit = true;
+            }
+            for side in [-2.6, 2.6] {
+                self.peds.spawn_cop(cx + rx * side + tx * 3.0, cz + rz * side + tz * 3.0, true);
+            }
+            return;
+        }
     }
 
     fn spawn_cop_near(&mut self, armed: bool) {
@@ -1497,6 +1597,58 @@ mod tests {
         assert!((sim.player_x()).abs() < 1e-6 && (sim.player_z()).abs() < 1e-6);
         assert_eq!(sim.player_money() as i64, money_before as i64 - 100);
         assert!((sim.player_health() - 100.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn respawns_use_real_pois() {
+        let mut sim = Sim::new(1, 0.0, 0.0);
+        sim.load_heightfield(0, 0, -500.0, -500.0, 1000.0, &vec![0.0; FIELD_SIZE * FIELD_SIZE]);
+        sim.set_player_enabled(true);
+        // A hospital at (200, 300), a police station at (-150, -100).
+        sim.load_pois(0, 0, &[0, 1], &[200.0, 300.0, -150.0, -100.0]);
+        assert_eq!(sim.poi_count(), 2);
+
+        sim.damage_player(999.0);
+        for _ in 0..400 {
+            sim.step(SUBSTEP);
+            if !sim.player_dead() {
+                break;
+            }
+        }
+        assert!((sim.player_x() - 200.0).abs() < 1.0, "woke at the hospital");
+        assert!((sim.player_z() - 300.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn four_stars_builds_roadblocks() {
+        let mut sim = Sim::new(1, 0.0, 0.0);
+        sim.load_heightfield(0, 0, -500.0, -500.0, 1000.0, &vec![0.0; FIELD_SIZE * FIELD_SIZE]);
+        // A long road 150m north for the roadblock to land on.
+        sim.load_tile_roads(
+            0,
+            0,
+            &[-300.0, -150.0, 300.0, -150.0],
+            &[0, 2],
+            &[2 | (8 << 16)], // primary, two-way
+        );
+        sim.set_player_enabled(true);
+        sim.add_heat(170.0);
+        assert_eq!(sim.wanted_level(), 4);
+        let mut blocked = false;
+        for _ in 0..(30 * 60) {
+            sim.step(SUBSTEP);
+            let parked_police = sim
+                .traffic
+                .cars
+                .iter()
+                .filter(|c| c.pursuit && c.edge == u32::MAX)
+                .count();
+            if parked_police >= 2 {
+                blocked = true;
+                break;
+            }
+        }
+        assert!(blocked, "no roadblock formed at 4 stars");
     }
 
     #[test]

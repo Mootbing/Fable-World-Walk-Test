@@ -4,8 +4,8 @@
 
 use crate::events::{Events, EV_BUSTED, EV_WANTED_CHANGED};
 
-/// Heat thresholds for stars 1..=3.
-const THRESHOLDS: [f64; 3] = [10.0, 40.0, 90.0];
+/// Heat thresholds for stars 1..=4 (5-6 arrive with helicopters, PR36).
+const THRESHOLDS: [f64; 4] = [10.0, 40.0, 90.0, 160.0];
 /// Unseen this long → all stars clear (classic flash-then-clear).
 const EVADE_T: f64 = 15.0;
 /// Cop adjacent + player still this long → arrest.
@@ -100,7 +100,8 @@ impl Wanted {
             0 => (0, 0, 0),
             1 => (2, 0, 0),
             2 => (0, 4, 0),
-            _ => (0, 5, 2),
+            3 => (0, 5, 2),
+            _ => (0, 6, 3),
         }
     }
 }
@@ -119,6 +120,8 @@ mod tests {
         assert_eq!(w.level, 2);
         w.add_heat(50.0, &mut ev);
         assert_eq!(w.level, 3);
+        w.add_heat(80.0, &mut ev);
+        assert_eq!(w.level, 4);
         // Unseen long enough: everything clears.
         for _ in 0..(16 * 60) {
             w.tick(false, false, 1.0 / 60.0, &mut ev);

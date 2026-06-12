@@ -44,6 +44,8 @@ export function installTestHook(engine: WorldEngine): () => void {
           return engine.sim ? engine.sim.driving() : false;
         case "weapon":
           return engine.sim ? engine.sim.weaponState() : null;
+        case "pois":
+          return engine.sim ? engine.sim.poiCount() : 0;
         case "wanted":
           return engine.sim ? engine.sim.wantedLevel() : 0;
         case "evading":

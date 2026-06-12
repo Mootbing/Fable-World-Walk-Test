@@ -221,9 +221,16 @@ Dev server runs on **port 3001** (3000 belongs to another app on this machine).
   (chase→bust→fine/confiscate/relocate round trip, armed cops land shots,
   evasion clears, arrest needs sustained adjacency); smoke raises stars,
   sees uniformed cops spawn, and flips the evasion flag out of sight.
-- [ ] **PR22 `feat: wanted v2 — 4★ roadblocks, spikes, hospital/police POI respawn`** —
-  roadblocks ahead on graph, spike strips, PIT; `poi` layer registry.
-
+- [x] **PR22 `feat: wanted v2 — 4★ roadblocks + real POI respawns`** —
+  4th heat tier (160 → 6 armed + 3 cruisers); roadblocks: two angled
+  cruisers parked across a street 100–200 m out with armed cops covering,
+  refreshed every 6 s up to 2 blocks; `poi` layer extraction (the midtown
+  tile alone carries 26 hospitals + 6 precincts incl. the NYPD Times
+  Square Substation) streamed into the sim — **death respawns at the
+  nearest real hospital, busted at the nearest real police station**
+  (spawn fallbacks). Spike strips + PIT deferred (noted). *Verified:* 67
+  Rust tests (hospital respawn coordinates, roadblock forms at 4★);
+  smoke sees ≥10 real POIs streamed.
 ## Phase 5 — Missions & progression
 
 - [ ] **PR23 `feat: save/load + pause menu + settings`** — localStorage slots
