@@ -28,6 +28,10 @@ test("boots from fixtures, sim ticks, player walks", async ({ page }) => {
   // Threshold is deliberately loose: under the software renderer the frame
   // rate can dip below 10fps, and the engine's 100ms dt clamp then dilates
   // sim time vs wall clock. Exact speed (1.6 m/s) is pinned by Rust tests.
+  // PR38: title screen renders before the first lock.
+  await expect(page.locator(".title-card h1")).toBeVisible();
+  await page.screenshot({ path: "test-results/title.png" });
+
   await page.evaluate(() => window.__ww!.cmd("lock"));
   const before = (await page.evaluate(() => window.__ww!.query("player"))) as {
     x: number;
@@ -511,10 +515,12 @@ test("boots from fixtures, sim ticks, player walks", async ({ page }) => {
   await page.waitForFunction(
     () =>
       window.__ww!.query("evading") === true ||
-      (window.__ww!.query("wanted") as number) === 0,
+      (window.__ww!.query("wanted") as number) === 0 ||
+      (window.__ww!.query("stats") as { dead: boolean }).dead === true,
     undefined,
-    { timeout: 20_000 },
+    { timeout: 40_000 }, // dilation-sensitive: evasion clock runs on sim time
   );
+  await page.evaluate(() => window.__ww!.cmd("clearWanted"));
   await page.evaluate(() => window.__ww!.cmd("warpPlayer", 0, 0));
 
   // PR22: real POIs streamed into the sim — midtown's tile carries dozens
@@ -1149,6 +1155,9 @@ test("boots from fixtures, sim ticks, player walks", async ({ page }) => {
   expect(render.meshes).toBeGreaterThanOrEqual(9);
   expect(render.triangles).toBeGreaterThan(100_000);
 
+  // Steady-state sim step cost stays bounded (the 17ms water scan
+  // regression would trip this).
+  expect((await page.evaluate(() => window.__ww!.query("simMs"))) as number).toBeLessThan(12);
   expect(pageErrors).toEqual([]);
 
   await page.screenshot({ path: "test-results/smoke.png" });

@@ -512,3 +512,33 @@ body {
   padding: 1px 0;
   opacity: 0.9;
 }
+
+.title-card { text-align: center; }
+.title-kicker {
+  letter-spacing: 6px;
+  font-size: 12px;
+  text-transform: uppercase;
+  opacity: 0.65;
+}
+.title-card h1 {
+  font-size: 64px;
+  letter-spacing: 4px;
+  margin: 6px 0 10px;
+}
+.title-card h1 span { color: #8fd07f; }
+.title-sub { max-width: 560px; opacity: 0.85; line-height: 1.5; margin: 0 auto; }
+.title-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: 4px 28px;
+  margin-top: 18px;
+  font-size: 13px;
+}
+.title-control { display: flex; gap: 10px; align-items: baseline; }
+.title-key {
+  min-width: 92px;
+  text-align: right;
+  color: #8fd07f;
+  font-weight: 600;
+}
+.title-credits { margin-top: 18px; font-size: 11px; opacity: 0.5; }
