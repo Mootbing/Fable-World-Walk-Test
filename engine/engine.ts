@@ -19,7 +19,7 @@ import { extractRoadTile, RoadTile } from "./roads";
 import { extractPlaces, extractPois, resolveArea, Place, Poi } from "./places";
 import type { CameraClamp } from "./render/cameraRig";
 import { MissionRuntime } from "@/game/missionRuntime";
-import { MISSIONS, M01 } from "@/game/missions";
+import { MISSIONS } from "@/game/missions";
 import { useHud } from "./store";
 
 export const WEAPON_NAMES = ["Fists", "Bat", "Pistol", "SMG", "Shotgun"];
@@ -103,6 +103,8 @@ export class WorldEngine {
   /** Per-frame driving snapshot for the chase cam + HUD. */
   driveState: { yaw: number; speed: number } | null = null;
   readonly missions = new MissionRuntime();
+  /** Ped ids killed since the last mission start (eliminate objectives). */
+  readonly killedPeds = new Set<number>();
   private marker: THREE.Mesh;
   private markerPos: { x: number; z: number } | null = null;
 
@@ -325,6 +327,7 @@ export class WorldEngine {
       const events = this.sim.drainEvents();
       if (events.length > 0) {
         for (let i = 0; i < events.length; i += 4) {
+          if (events[i] === 13) this.killedPeds.add(events[i + 1]);
           if (events[i] === 17) {
             const f32 = new Float32Array(
               new Uint32Array([events[i + 1], events[i + 2], events[i + 3]]).buffer,
@@ -376,22 +379,18 @@ export class WorldEngine {
     this.missions.update(this, dt);
 
     // Mission start corona: the M01 marker waits near spawn.
-    if (
-      this.sim &&
-      !this.missions.activeMissionId &&
-      !this.missions.isDone(M01.id) &&
-      this.markerPos === null
-    ) {
+    const nextMission = MISSIONS.find((m) => !this.missions.isDone(m.id));
+    if (this.sim && !this.missions.activeMissionId && nextMission && this.markerPos === null) {
       this.setMissionMarker(6, 8);
     }
     if (
       this.sim &&
       !this.missions.activeMissionId &&
-      !this.missions.isDone(M01.id) &&
+      nextMission &&
       this.markerPos &&
       Math.hypot(this.playerX - this.markerPos.x, this.playerZ - this.markerPos.z) < 2.6
     ) {
-      this.missions.start(MISSIONS[0], this);
+      this.missions.start(nextMission, this);
     }
     if (this.marker.visible) {
       this.marker.rotation.y += dt * 1.2;
@@ -494,6 +493,18 @@ export class WorldEngine {
     },
     sampleGround: (x, z) => this.heights.sample(x, z),
   };
+
+  /** Destroyed = husk flag set, or gone from the entity buffer. */
+  isVehicleDestroyed(id: number): boolean {
+    if (!this.sim) return false;
+    const u32 = this.sim.entityViewU32();
+    for (let base = 0; base < u32.length; base += 16) {
+      if (u32[base + 13] >>> 16 === 2 && u32[base + 12] === id) {
+        return (u32[base + 14] & 128) !== 0;
+      }
+    }
+    return true; // despawned husk counts
+  }
 
   /** Mission marker corona position (null hides it). */
   setMissionMarker(x: number | null, z: number | null): void {

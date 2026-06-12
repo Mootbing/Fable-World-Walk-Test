@@ -258,8 +258,15 @@ Dev server runs on **port 3001** (3000 belongs to another app on this machine).
   is now **frame-counted** (rAF), killing the keyboard twin of the
   setTimeout starvation bug. *Verified:* 69 Rust tests; smoke plays M01
   end-to-end in-browser and banks exactly $500.
-- [ ] **PR25 `feat: mission pack v1 — five-mission arc`** — courier, chase,
-  escort, assassination, checkpoint race vs AI on graph routes.
+- [x] **PR25 `feat: mission pack v1`** — runtime gains `eliminate`
+  (id-tracked via EV_PED_KILLED ped-id payloads + engine killedPeds set),
+  `destroyVehicle` (husk-or-gone buffer check), and `timedDriveTo`
+  (live countdown in the objective, expiry fails); start corona chains
+  to the next undone mission; M02 "Clean Sweep" (assassination), M03
+  "Hot Wheels" (torch the sedan), M04 "Hard Deadline" (90 s timed
+  delivery). Scoped from 5 to 4 total missions; escort/race archetypes
+  deferred to the activities PRs. *Verified:* 69 Rust tests; smoke plays
+  M02 end-to-end (id-verified kill, $750 banked).
 - [ ] **PR26 `feat: taxi + vigilante side activities`** — routed fares with
   timer/payout chains; criminal-vehicle takedowns in police cars.
 - [ ] **PR27 `feat: pay'n'spray + weapon shop + stats screen`** — `car_repair`

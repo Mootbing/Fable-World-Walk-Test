@@ -729,12 +729,12 @@ impl Sim {
                 .peds
                 .punch(self.player.x, self.player.z, yaw, s.damage, s.range, self.time)
             {
-                Some((killed, hx, hz)) => {
+                Some((killed, hx, hz, hit_id)) => {
                     self.events.push(EV_PUNCH, 1, 0, 0);
                     self.peds.scatter((self.player.x, self.player.z), 11.0, self.time + 5.0);
                     self.wanted.add_heat(6.0, &mut self.events);
                     if killed {
-                        self.events.push(EV_PED_KILLED, 0, 0, 0);
+                        self.events.push(EV_PED_KILLED, hit_id, 0, 0);
                         self.wanted.add_heat(25.0, &mut self.events);
                         let drop = 10 + self.rng.next_below(40) as i64;
                         let y = self.heights.sample(hx, hz).unwrap_or(0.0);
@@ -1111,8 +1111,9 @@ impl Sim {
             let (px, pz) = (self.peds.peds[i].x, self.peds.peds[i].z);
             let d = ((px - x).powi(2) + (pz - z).powi(2)).sqrt();
             if d < RADIUS && !self.peds.peds[i].dead {
+                let hit_id = self.peds.peds[i].id;
                 if self.peds.apply_damage(i, 200.0, (x, z), self.time) {
-                    self.events.push(EV_PED_KILLED, 0, 0, 0);
+                    self.events.push(EV_PED_KILLED, hit_id, 0, 0);
                 }
             }
         }
@@ -1209,8 +1210,9 @@ impl Sim {
             }
             if let Some(i) = ped_idx {
                 let was_cop = self.peds.peds[i].cop;
+                let hit_id = self.peds.peds[i].id;
                 if self.peds.apply_damage(i, s.damage, (ox, oz), self.time) {
-                    self.events.push(EV_PED_KILLED, 0, 0, 0);
+                    self.events.push(EV_PED_KILLED, hit_id, 0, 0);
                     self.wanted
                         .add_heat(if was_cop { 40.0 } else { 25.0 }, &mut self.events);
                     if !was_cop {
