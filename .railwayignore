@@ -1,0 +1,16 @@
+# Like .gitignore, but the prebuilt wasm + bindings DO ship (Railway's
+# builder has no Rust toolchain; railway.json builds with plain `next build`).
+/node_modules
+/.next/
+/out/
+/build
+/sim/target/
+/.cargo/
+/test-results/
+/playwright-report/
+.git
+.DS_Store
+*.pem
+npm-debug.log*
+.env*.local
+*.tsbuildinfo
