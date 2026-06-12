@@ -24,6 +24,8 @@ export default function Hud() {
   const weapon = useHud((s) => s.weapon);
   const wanted = useHud((s) => s.wanted);
   const busted = useHud((s) => s.busted);
+  const mission = useHud((s) => s.mission);
+  const missionFlash = useHud((s) => s.missionFlash);
 
   return (
     <>
@@ -51,6 +53,17 @@ export default function Hud() {
           <div className="bar armor">
             <div style={{ width: `${Math.max(0, Math.min(100, armor))}%` }} />
           </div>
+        </div>
+      )}
+      {locked && mission && (
+        <div className="mission">
+          <div className="mission-title">{mission.title}</div>
+          <div className="mission-objective">{mission.objective}</div>
+        </div>
+      )}
+      {missionFlash && (
+        <div key={missionFlash} className="mission-flash">
+          {missionFlash}
         </div>
       )}
       {dead && <div className="wasted">WASTED</div>}

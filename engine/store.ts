@@ -39,6 +39,8 @@ interface HudState {
   weapon: { name: string; clip: number; reserve: number; reloading: boolean } | null;
   wanted: number;
   busted: boolean;
+  mission: { title: string; objective: string } | null;
+  missionFlash: string;
   /** Game clock HH:MM. */
   clock: string;
 }
@@ -75,4 +77,6 @@ export const useHud = create<HudState>(() => ({
   weapon: null,
   wanted: 0,
   busted: false,
+  mission: null,
+  missionFlash: "",
 }));

@@ -508,6 +508,23 @@ impl Sim {
         self.driving.map_or(0, |i| self.vehicles[i].kind)
     }
 
+    /// Id of the vehicle being driven, or 0.
+    pub fn driving_vehicle_id(&self) -> u32 {
+        self.driving.map_or(0, |i| self.vehicles[i].id)
+    }
+
+    /// Mission rewards / fees / shops.
+    pub fn give_money(&mut self, amount: f64) {
+        self.stats.add_money(amount as i64);
+    }
+
+    /// Pay'n'spray / mission scripting: drop all heat instantly.
+    pub fn clear_wanted(&mut self) {
+        self.wanted.clear(&mut self.events);
+        self.peds.dismiss_cops(self.time);
+        self.traffic.end_pursuits();
+    }
+
     pub fn driving(&self) -> bool {
         self.driving.is_some()
     }
@@ -1266,8 +1283,8 @@ impl Sim {
             self.time + 6.0,
             &mut self.rng,
         );
-        let id = self.next_vehicle_id;
-        self.next_vehicle_id += 1;
+        // Keep the traffic id: missions track specific cars across the jack.
+        let id = car.id;
         let mut v = Vehicle::new(id, car.kind, car.paint, car.x, car.z, car.yaw);
         v.v_long = car.speed * 0.3;
         self.vehicles.push(v);

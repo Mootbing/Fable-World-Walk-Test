@@ -1,5 +1,6 @@
 import { useHud } from "./store";
 import { saveGame, loadGame } from "./save";
+import { MISSIONS } from "@/game/missions";
 import type { WorldEngine } from "./engine";
 
 /**
@@ -45,6 +46,13 @@ export function installTestHook(engine: WorldEngine): () => void {
           return engine.sim ? engine.sim.driving() : false;
         case "weapon":
           return engine.sim ? engine.sim.weaponState() : null;
+        case "mission":
+          return {
+            active: engine.missions.activeMissionId,
+            step: engine.missions.currentStep,
+            flash: useHud.getState().missionFlash,
+            objective: useHud.getState().mission?.objective ?? "",
+          };
         case "pois":
           return engine.sim ? engine.sim.poiCount() : 0;
         case "wanted":
@@ -161,6 +169,14 @@ export function installTestHook(engine: WorldEngine): () => void {
           engine.sim?.equipWeapon(id);
           return true;
         }
+        case "startMission": {
+          const [id] = args as [string];
+          const def = MISSIONS.find((m) => m.id === id) ?? MISSIONS[0];
+          return engine.missions.start(def, engine);
+        }
+        case "clearWanted":
+          engine.sim?.clearWanted();
+          return true;
         case "save": {
           const [slot] = args as [number];
           return saveGame(engine, slot ?? 1);
@@ -213,13 +229,25 @@ export function installTestHook(engine: WorldEngine): () => void {
       }
     },
     press: (code, ms = 100) => {
+      // Release is frame-counted, not setTimeout'd: timers starve under
+      // load and a keyup that fires between frame samples leaves the key
+      // logically stuck (no edge for the next press). Two rAF frames
+      // guarantee the input sampler saw the hold.
       window.dispatchEvent(new KeyboardEvent("keydown", { code }));
-      return new Promise((resolve) =>
-        setTimeout(() => {
-          window.dispatchEvent(new KeyboardEvent("keyup", { code }));
-          resolve();
-        }, ms),
-      );
+      return new Promise((resolve) => {
+        const start = performance.now();
+        let frames = 0;
+        const tick = () => {
+          frames++;
+          if (frames >= 2 && performance.now() - start >= ms) {
+            window.dispatchEvent(new KeyboardEvent("keyup", { code }));
+            resolve();
+          } else {
+            requestAnimationFrame(tick);
+          }
+        };
+        requestAnimationFrame(tick);
+      });
     },
   };
   window.__ww = api;

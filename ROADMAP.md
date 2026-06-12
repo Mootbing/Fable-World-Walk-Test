@@ -246,8 +246,18 @@ Dev server runs on **port 3001** (3000 belongs to another app on this machine).
   round trip, version rejection, post-respawn melee regression); smoke
   saves → trashes state → loads → position/money/health restored, pause
   menu screenshot.
-- [ ] **PR24 `feat: mission framework + first mission`** — data-driven
-  objective graphs, marker coronas, fail/reward, sim command API.
+- [x] **PR24 `feat: mission framework + first mission`** — data-driven
+  runtime (`game/missionRuntime.ts`): goTo / enterVehicle(specific) /
+  driveTo / loseWanted steps, per-step GPS waypoint + golden corona
+  marker, fail on death/busted, rewards via `give_money`, completion
+  persisted; **carjack now preserves the vehicle id** so missions track
+  "steal THAT car" across the jack; `clear_wanted` wasm (pay'n'spray
+  reuse); M01 "Off The Bus" (corner → marked taxi → delivery → lose the
+  heat, $500) with a start corona near spawn; mission HUD (title/
+  objective top-center, PASSED/FAILED flash). Harness: `press()` release
+  is now **frame-counted** (rAF), killing the keyboard twin of the
+  setTimeout starvation bug. *Verified:* 69 Rust tests; smoke plays M01
+  end-to-end in-browser and banks exactly $500.
 - [ ] **PR25 `feat: mission pack v1 — five-mission arc`** — courier, chase,
   escort, assassination, checkpoint race vs AI on graph routes.
 - [ ] **PR26 `feat: taxi + vigilante side activities`** — routed fares with

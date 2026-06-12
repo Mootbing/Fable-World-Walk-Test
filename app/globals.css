@@ -439,3 +439,39 @@ body {
 
 .pause-flash { color: #7fd98a; font-size: 13px; }
 .pause-hint { color: #748699; font-size: 12px; }
+
+.mission {
+  position: fixed;
+  left: 50%;
+  top: 14px;
+  transform: translateX(-50%);
+  text-align: center;
+  pointer-events: none;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.8);
+}
+
+.mission-title {
+  font: 700 13px/1.2 system-ui, sans-serif;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #e8b54a;
+}
+
+.mission-objective {
+  font: 500 15px/1.4 system-ui, sans-serif;
+  color: #eef2f7;
+}
+
+.mission-flash {
+  position: fixed;
+  left: 50%;
+  top: 38%;
+  transform: translateX(-50%);
+  font: 800 40px/1 Georgia, serif;
+  letter-spacing: 0.12em;
+  color: #e8b54a;
+  text-shadow: 0 3px 18px rgba(0, 0, 0, 0.9);
+  pointer-events: none;
+  animation: area-fade 5s ease forwards;
+  z-index: 14;
+}

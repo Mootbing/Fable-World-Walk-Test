@@ -551,6 +551,53 @@ test("boots from fixtures, sim ticks, player walks", async ({ page }) => {
   await page.screenshot({ path: "test-results/pause.png" });
   await page.evaluate(() => window.__ww!.cmd("lock"));
 
+  // PR24: mission M01 end-to-end — corner, marked taxi, delivery, heat.
+  expect(await page.evaluate(() => window.__ww!.cmd("startMission", "m01"))).toBe(true);
+  await page.evaluate(() => window.__ww!.cmd("warpPlayer", 2, -40));
+  await page.waitForFunction(
+    () => (window.__ww!.query("mission") as { step: number }).step >= 1,
+    undefined,
+    { timeout: 8_000 },
+  );
+  await page.evaluate(() => window.__ww!.cmd("warpPlayer", 8.2, -45));
+  await page.evaluate(() => window.__ww!.press("KeyE", 200));
+  await page.waitForFunction(
+    () => (window.__ww!.query("mission") as { step: number }).step >= 2,
+    undefined,
+    { timeout: 8_000 },
+  );
+  // Drive north until the drop completes (count-driven, dilation-proof).
+  for (let leg = 0; leg < 16; leg++) {
+    const m = (await page.evaluate(() => window.__ww!.query("mission"))) as { step: number };
+    if (m.step >= 3) break;
+    await page.evaluate(() => window.__ww!.press("KeyW", 2000));
+    await page.waitForTimeout(2300);
+  }
+  await page.waitForFunction(
+    () => (window.__ww!.query("mission") as { step: number }).step >= 3,
+    undefined,
+    { timeout: 5_000 },
+  );
+  const moneyBeforeReward = (await page.evaluate(
+    () => (window.__ww!.query("stats") as { money: number }).money,
+  )) as number;
+  await page.evaluate(() => window.__ww!.cmd("clearWanted"));
+  await page.waitForFunction(
+    () => ((window.__ww!.query("mission") as { flash: string }).flash ?? "").includes("PASSED"),
+    undefined,
+    { timeout: 8_000 },
+  );
+  const moneyAfterReward = (await page.evaluate(
+    () => (window.__ww!.query("stats") as { money: number }).money,
+  )) as number;
+  expect(moneyAfterReward).toBe(moneyBeforeReward + 500);
+  await page.screenshot({ path: "test-results/mission-passed.png" });
+  // step out of the delivery car for later blocks
+  await page.evaluate(() => window.__ww!.press("KeyE", 200));
+  await page.waitForFunction(() => window.__ww!.query("driving") === false, undefined, {
+    timeout: 5_000,
+  });
+
   // World actually meshed: 9 terrain chunks alone are ~295k triangles, and
   // Times Square building tiles add meshes on top.
   const render = (await page.evaluate(() => window.__ww!.query("render"))) as {
