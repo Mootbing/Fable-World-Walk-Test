@@ -6,7 +6,7 @@ const PORT = 4517;
 
 export default defineConfig({
   testDir: "./tests",
-  timeout: 300_000, // ~20 sequential feature blocks at degraded headless fps
+  timeout: 420_000, // ~35 sequential feature blocks at degraded headless fps
   fullyParallel: false,
   use: {
     baseURL: `http://localhost:${PORT}`,
@@ -16,7 +16,7 @@ export default defineConfig({
     command: `npx next dev -p ${PORT}`,
     url: `http://localhost:${PORT}`,
     reuseExistingServer: false,
-    timeout: 300_000, // ~20 sequential feature blocks at degraded headless fps
+    timeout: 420_000, // ~35 sequential feature blocks at degraded headless fps
     env: { NEXT_PUBLIC_FIXTURE: "1" },
   },
 });

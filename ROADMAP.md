@@ -295,7 +295,7 @@ Dev server runs on **port 3001** (3000 belongs to another app on this machine).
   police heli + spotlight, heavy response.
 - [x] **PR37 `feat: bridge decks + grade separation v2`** — elevated deck
   ribbons from `brunnel=bridge` + `layer`, drivable height overrides.
-- [ ] **PR38 `chore: performance audit + title screen + docs`** — soak/profile
+- [x] **PR38 `chore: performance audit + title screen + docs`** — soak/profile
   budgets (sim <4 ms), title screen, README as game manual, parity audit.
 
 Out of scope: planes, multiplayer, gangs/territory.

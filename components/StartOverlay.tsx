@@ -3,6 +3,19 @@
 import { useHud, LOCK_EVENT } from "@/engine/store";
 import { CONFIG } from "@/engine/config";
 
+const CONTROLS: [string, string][] = [
+  ["WASD", "move / drive"],
+  ["Shift", "sprint · heli down"],
+  ["Space", "jump · handbrake · heli up"],
+  ["E", "enter / exit vehicle"],
+  ["LMB / RMB", "attack / aim"],
+  ["Tab · 1-5 · Q", "weapons"],
+  ["R", "reload · radio (in car)"],
+  ["T", "taxi / vigilante / paramedic jobs"],
+  ["V", "first / third person"],
+  ["M", "map · G road debug · H horn"],
+];
+
 export default function StartOverlay() {
   const ready = useHud((s) => s.ready);
   const locked = useHud((s) => s.locked);
@@ -13,23 +26,39 @@ export default function StartOverlay() {
 
   return (
     <div className="overlay">
-      <h1>World Walk</h1>
+      <div className="title-card">
+        <div className="title-kicker">A real-world open city</div>
+        <h1>
+          WORLD<span>WALK</span>
+        </h1>
+        <div className="title-sub">
+          {CONFIG.spawnLat.toFixed(4)}, {CONFIG.spawnLon.toFixed(4)} — rebuilt live from
+          satellite imagery, elevation data and OpenStreetMap. Drive it, fly it, swim it,
+          or just cause trouble in it.
+        </div>
+      </div>
       {ready ? (
         <>
-          <p>
-            You are standing at {CONFIG.spawnLat.toFixed(4)}, {CONFIG.spawnLon.toFixed(4)} — a
-            real place, rebuilt live from satellite imagery, elevation data and building
-            footprints.
-          </p>
           <button onClick={() => window.dispatchEvent(new Event(LOCK_EVENT))}>
-            Click to walk
+            Click to play
           </button>
-          <div className="keys">WASD move · Shift sprint · mouse look · Esc release</div>
+          <div className="title-controls">
+            {CONTROLS.map(([key, what]) => (
+              <div key={key} className="title-control">
+                <span className="title-key">{key}</span>
+                <span>{what}</span>
+              </div>
+            ))}
+          </div>
+          <div className="title-credits">
+            Imagery: Esri · Terrain: Mapzen/AWS · Map data © OpenStreetMap contributors ·
+            Sim: Rust → WebAssembly
+          </div>
         </>
       ) : (
         <>
           <div className="spinner" />
-          <p>Streaming the world in around you…</p>
+          <p>Streaming the city in around you…</p>
         </>
       )}
     </div>
