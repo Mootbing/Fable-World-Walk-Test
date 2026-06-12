@@ -46,6 +46,15 @@ export function installTestHook(engine: WorldEngine): () => void {
           return engine.sim ? engine.sim.driving() : false;
         case "weapon":
           return engine.sim ? engine.sim.weaponState() : null;
+        case "weather":
+          return engine.sim
+            ? {
+                state: engine.sim.weather(),
+                grip: engine.sim.weatherGrip(),
+                fogScale: engine.fogScale,
+                drops: engine.weatherFx.activeDrops,
+              }
+            : null;
         case "daylight":
           return {
             factor: engine.dayState.daylight,
@@ -202,6 +211,9 @@ export function installTestHook(engine: WorldEngine): () => void {
           engine.sim?.equipWeapon(id);
           return true;
         }
+        case "setWeather":
+          engine.sim?.setWeather(args[0] as number);
+          return true;
         case "setClock":
           engine.clockMinutes = args[0] as number;
           return true;

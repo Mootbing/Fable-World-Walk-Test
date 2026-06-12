@@ -128,9 +128,12 @@ impl Vehicle {
         heights: &HeightGrid,
         collision: &CollisionWorld,
         events: &mut Events,
+        grip_scale: f64,
         dt: f64,
     ) {
         let s = spec(self.kind);
+        // Wet roads: grip drops hard, brakes a bit (weather drives this).
+        let brake_scale = 0.7 + 0.3 * grip_scale;
         let (throttle, steer_in, handbrake) = match input {
             Some(i) => (i.throttle, i.steer, i.handbrake),
             None => (0.0, 0.0, false),
@@ -139,13 +142,13 @@ impl Vehicle {
         // --- longitudinal ---
         if throttle > 0.0 {
             if self.v_long < 0.0 {
-                self.v_long += s.brake * throttle * dt; // braking out of reverse
+                self.v_long += s.brake * brake_scale * throttle * dt; // braking out of reverse
             } else {
                 self.v_long += s.accel * throttle * dt;
             }
         } else if throttle < 0.0 {
             if self.v_long > 0.5 {
-                self.v_long += s.brake * throttle * dt; // braking
+                self.v_long += s.brake * brake_scale * throttle * dt; // braking
             } else {
                 self.v_long += s.accel * 0.6 * throttle * dt; // reversing
             }
@@ -178,7 +181,7 @@ impl Vehicle {
         // Yawing transfers some longitudinal velocity into the lateral
         // channel (the rear stepping out).
         self.v_lat += yaw_rate * self.v_long * 0.25 * dt;
-        let grip = if handbrake { GRIP_HANDBRAKE } else { s.grip };
+        let grip = if handbrake { GRIP_HANDBRAKE } else { s.grip * grip_scale };
         self.v_lat *= (-grip * dt).exp();
 
         // --- integrate ---
@@ -275,7 +278,7 @@ mod tests {
         let mut ev = Events::new();
         let steps = (seconds / DT) as usize;
         for _ in 0..steps {
-            v.substep(Some(&input), hg, cw, &mut ev, DT);
+            v.substep(Some(&input), hg, cw, &mut ev, 1.0, DT);
         }
     }
 
@@ -379,7 +382,7 @@ mod tests {
         let input = DriveInput { throttle: 1.0, steer: 0.0, handbrake: false };
         let mut crashed = false;
         for _ in 0..600 {
-            v.substep(Some(&input), &hg, &cw, &mut ev, DT);
+            v.substep(Some(&input), &hg, &cw, &mut ev, 1.0, DT);
             for e in 0..ev.count() as usize {
                 if unsafe { *ev.as_ptr().add(e * 4) } == EV_CRASH {
                     crashed = true;

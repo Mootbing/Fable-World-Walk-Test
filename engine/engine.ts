@@ -22,6 +22,7 @@ import { MissionRuntime } from "@/game/missionRuntime";
 import { Activities } from "@/game/activities";
 import { Shops } from "@/game/shops";
 import { computeDayState, createDayState } from "./render/dayNight";
+import { WeatherFx } from "./render/weatherFx";
 import { MISSIONS } from "@/game/missions";
 import { useHud } from "./store";
 
@@ -55,6 +56,7 @@ const HUD_INTERVAL = 0.25;
 const READY_TIMEOUT = 15;
 /** Test/debug event log capacity (4-word records, newest last). */
 const EVENT_LOG_CAP = 64;
+const FLASH_WHITE = new THREE.Color(0xf4f6ff);
 
 interface PendingTile {
   tx: number;
@@ -97,6 +99,11 @@ export class WorldEngine {
   readonly dayState = createDayState();
   /** Current lit-window opacity (observability for tests). */
   windowGlowOpacity = 0;
+  readonly weatherFx = new WeatherFx();
+  /** Fog near/far multiplier from weather (World.tsx applies it). */
+  fogScale = 1;
+  /** Lightning flash 0..1, decays fast; whitens the sky in storms. */
+  flash = 0;
   private headlight = new THREE.SpotLight(0xfff1cf, 0, 70, 0.42, 0.45, 1.2);
   /** Renderer-reported camera state, for HUD/tests/minimap. */
   camMode: "fp" | "tp" = "fp";
@@ -161,6 +168,7 @@ export class WorldEngine {
       this.pedPools.group,
       this.pickupPools.group,
       this.fx.group,
+      this.weatherFx.group,
     );
 
     // Every decoded heightfield mirrors into the sim (queued until boot).
@@ -309,6 +317,22 @@ export class WorldEngine {
     this.elapsed += dt;
     this.clockMinutes = (this.clockMinutes + dt) % 1440;
     computeDayState(this.clockMinutes, this.dayState);
+    const weather = this.sim?.weather() ?? 0;
+    // Weather sits on top of the clock: dimmer, closer fog, rain, flashes.
+    const skyMul = [1, 0.72, 0.5, 0.36][weather];
+    const lightMul = [1, 0.82, 0.62, 0.5][weather];
+    this.dayState.sky.multiplyScalar(skyMul);
+    this.dayState.hemiIntensity *= lightMul;
+    this.dayState.dirIntensity *= lightMul;
+    this.fogScale = [1, 0.8, 0.45, 0.3][weather];
+    this.weatherFx.intensity = weather === 2 ? 0.55 : weather === 3 ? 1 : 0;
+    this.weatherFx.update(dt, this.camPos.x, this.camPos.y, this.camPos.z);
+    if (weather === 3 && Math.random() < dt * 0.25) this.flash = 1;
+    this.flash = Math.max(0, this.flash - dt * 5);
+    if (this.flash > 0) {
+      this.dayState.sky.lerp(FLASH_WHITE, this.flash * 0.8);
+      this.dayState.dirIntensity += this.flash * 1.6;
+    }
     const night = this.dayState.daylight < 0.35;
     this.vehiclePools.night = night;
     this.windowGlowOpacity = Math.max(0, 1 - this.dayState.daylight * 2.2) * 0.95;
