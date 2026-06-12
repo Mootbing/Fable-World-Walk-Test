@@ -641,6 +641,60 @@ test("boots from fixtures, sim ticks, player walks", async ({ page }) => {
     (await page.evaluate(() => (window.__ww!.query("stats") as { money: number }).money)) as number,
   ).toBe(m02Money + 750);
 
+  // PR26: side activities — taxi fares and vigilante bounties arm and
+  // cancel correctly from the right vehicles.
+  const p26 = (await page.evaluate(() => window.__ww!.query("player"))) as {
+    x: number;
+    z: number;
+  };
+  await page.evaluate(
+    ([x, z]) => window.__ww!.cmd("spawnTraffic", x + 2.2, z, 3), // taxi
+    [p26.x, p26.z] as [number, number],
+  );
+  await page.evaluate(() => window.__ww!.press("KeyE", 250));
+  await page.waitForFunction(() => window.__ww!.query("driving") === true, undefined, {
+    timeout: 5_000,
+  });
+  const taxiAct = (await page.evaluate(() => window.__ww!.cmd("toggleActivity"))) as string;
+  expect(taxiAct).toBe("taxi");
+  const fare = (await page.evaluate(() => window.__ww!.query("activity"))) as {
+    stage: string;
+    target: { x: number; z: number };
+  };
+  expect(fare.stage).toBe("pickup");
+  expect(Math.hypot(fare.target.x - p26.x, fare.target.z - p26.z)).toBeGreaterThan(30);
+  await page.evaluate(() => window.__ww!.cmd("toggleActivity")); // cancel
+  expect(await page.evaluate(() => window.__ww!.query("activity"))).toBe(null);
+  await page.evaluate(() => window.__ww!.press("KeyE", 250)); // out of the cab
+  await page.waitForFunction(() => window.__ww!.query("driving") === false, undefined, {
+    timeout: 5_000,
+  });
+
+  // Step clear of the taxi so E can't re-grab it, then bring in a cruiser.
+  await page.evaluate(
+    ([x, z]) => window.__ww!.cmd("warpPlayer", x, z),
+    [p26.x - 40, p26.z] as [number, number],
+  );
+  await page.evaluate(
+    ([x, z]) => window.__ww!.cmd("spawnTraffic", x - 38, z, 4), // cruiser
+    [p26.x, p26.z] as [number, number],
+  );
+  await page.evaluate(() => window.__ww!.press("KeyE", 250));
+  await page.waitForFunction(() => window.__ww!.query("driving") === true, undefined, {
+    timeout: 5_000,
+  });
+  const vigAct = (await page.evaluate(() => window.__ww!.cmd("toggleActivity"))) as string;
+  expect(vigAct).toBe("vigilante");
+  const bounty = (await page.evaluate(() => window.__ww!.query("activity"))) as {
+    targetId: number;
+  };
+  expect(bounty.targetId).toBeGreaterThan(0);
+  await page.evaluate(() => window.__ww!.cmd("toggleActivity"));
+  await page.evaluate(() => window.__ww!.press("KeyE", 250));
+  await page.waitForFunction(() => window.__ww!.query("driving") === false, undefined, {
+    timeout: 5_000,
+  });
+
   // World actually meshed: 9 terrain chunks alone are ~295k triangles, and
   // Times Square building tiles add meshes on top.
   const render = (await page.evaluate(() => window.__ww!.query("render"))) as {

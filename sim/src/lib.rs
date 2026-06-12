@@ -499,6 +499,19 @@ impl Sim {
         self.weapons.give(id, ammo);
     }
 
+    /// Remove a ped by id (fares boarding, scripted cleanup).
+    pub fn remove_ped(&mut self, id: u32) -> bool {
+        self.peds.remove(id)
+    }
+
+    /// Vigilante target: a marked roaming car near the player; 0 if no
+    /// suitable edge.
+    pub fn spawn_marked_car(&mut self) -> u32 {
+        self.traffic
+            .spawn_marked_car(&self.roads, (self.player.x, self.player.z), &mut self.rng)
+            .unwrap_or(0)
+    }
+
     /// Debug/test: a stationary ped at (x,z).
     pub fn debug_spawn_ped(&mut self, x: f64, z: f64) -> u32 {
         self.peds.debug_spawn_idle(x, z)

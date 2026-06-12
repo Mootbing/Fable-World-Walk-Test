@@ -257,6 +257,13 @@ impl Peds {
         id
     }
 
+    /// Remove a ped outright (fares boarding the cab, scripted cleanup).
+    pub fn remove(&mut self, id: u32) -> bool {
+        let before = self.peds.len();
+        self.peds.retain(|p| p.id != id);
+        self.peds.len() != before
+    }
+
     pub fn cop_count(&self) -> (u32, u32) {
         let mut unarmed = 0;
         let mut armed = 0;
