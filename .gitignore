@@ -3,10 +3,10 @@
 /out/
 /build
 
-# Rust/wasm build outputs (rebuilt by npm run sim:build)
+# Rust build outputs (sim/pkg + public/sim_bg.wasm are COMMITTED so
+# deploys build with plain next build — no Rust toolchain needed there;
+# regenerate with npm run sim:build before release commits)
 /sim/target/
-/sim/pkg/
-/public/sim_bg.wasm
 # machine-specific cargo config (linker workaround)
 /.cargo/
 
