@@ -899,6 +899,42 @@ test("boots from fixtures, sim ticks, player walks", async ({ page }) => {
     { timeout: 8_000 },
   );
 
+  // PR32: radio — R cycles stations in a car, program persists, off on 4th.
+  const p32 = (await page.evaluate(() => window.__ww!.query("player"))) as {
+    x: number;
+    z: number;
+  };
+  await page.evaluate(
+    ([x, z]) => window.__ww!.cmd("warpPlayer", x, z),
+    [p32.x + 55, p32.z] as [number, number],
+  );
+  await page.evaluate(
+    ([x, z]) => window.__ww!.cmd("spawnTraffic", x + 57.2, z, 0),
+    [p32.x, p32.z] as [number, number],
+  );
+  await page.evaluate(() => window.__ww!.press("KeyE", 250));
+  await page.waitForFunction(() => window.__ww!.query("driving") === true, undefined, {
+    timeout: 5_000,
+  });
+  for (let i = 0; i < 5; i++) {
+    await page.evaluate(() => window.__ww!.press("KeyR", 600));
+    const r = (await page.evaluate(() => window.__ww!.query("radio"))) as { station: number };
+    if (r.station === 1) break;
+  }
+  const r32 = (await page.evaluate(() => window.__ww!.query("radio"))) as {
+    station: number;
+    name: string;
+  };
+  expect(r32.station).toBe(1);
+  expect(r32.name).toBe("Nightdrive FM");
+  expect(await page.evaluate(() => window.__ww!.cmd("radio"))).toBe(2);
+  expect(await page.evaluate(() => window.__ww!.cmd("radio"))).toBe(3);
+  expect(await page.evaluate(() => window.__ww!.cmd("radio"))).toBe(0);
+  await page.evaluate(() => window.__ww!.press("KeyE", 250));
+  await page.waitForFunction(() => window.__ww!.query("driving") === false, undefined, {
+    timeout: 5_000,
+  });
+
   // World actually meshed: 9 terrain chunks alone are ~295k triangles, and
   // Times Square building tiles add meshes on top.
   const render = (await page.evaluate(() => window.__ww!.query("render"))) as {

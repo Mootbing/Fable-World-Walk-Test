@@ -282,7 +282,7 @@ Dev server runs on **port 3001** (3000 belongs to another app on this machine).
   multiplier, fog, lightning.
 - [x] **PR31 `feat: audio engine`** — WebAudio mixer, procedural engine loops
   (RPM-pitched), gunshots/sirens/impacts from the sim event ring, panner pool.
-- [ ] **PR32 `feat: vehicle radio stations`** — 3 CC0 station loops, R cycles.
+- [x] **PR32 `feat: vehicle radio stations`** — 3 CC0 station loops, R cycles.
 - [ ] **PR33 `feat: character models + animation pass`** — low-poly rigged
   GLBs or hero-LOD skinned ring; OSM building vertex colors.
 

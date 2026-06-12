@@ -17,6 +17,13 @@ interface AudioUpdate {
   thunder: boolean;
 }
 
+export const STATIONS = ["Nightdrive FM", "Bedrock Beats", "Static AM"] as const;
+
+/** Chord roots (Hz) for the synthwave loop: Am, F, C, G. */
+const NIGHTDRIVE_ROOTS = [110, 87.31, 130.81, 98];
+/** Lo-fi stab: minor 7th intervals over the root. */
+const LOFI_CHORD = [1, 1.189, 1.498, 1.782];
+
 export class AudioEngine {
   unlocked = false;
   /** Lifetime one-shots scheduled (test observability). */
@@ -37,6 +44,12 @@ export class AudioEngine {
 
   private rainSrc: AudioBufferSourceNode | null = null;
   private rainGain: GainNode | null = null;
+
+  /** 0 = off, 1..STATIONS.length = on-air. */
+  station = 0;
+  private radioGain: GainNode | null = null;
+  private radioBarEnd = 0;
+  private radioBarIdx = 0;
 
   get ctxState(): string {
     return this.ctx ? this.ctx.state : "none";
@@ -118,7 +131,26 @@ export class AudioEngine {
     this.rainGain.connect(this.master);
     this.rainSrc.start();
 
+    this.radioGain = ctx.createGain();
+    this.radioGain.gain.value = 0;
+    this.radioGain.connect(this.master);
+
     this.unlocked = true;
+  }
+
+  get stationName(): string {
+    return this.station === 0 ? "Radio off" : STATIONS[this.station - 1];
+  }
+
+  /** Cycle off → 1 → … → N → off; returns the new station. */
+  nextStation(): number {
+    this.station = (this.station + 1) % (STATIONS.length + 1);
+    // Drop straight into the new program.
+    if (this.ctx) {
+      this.radioBarEnd = this.ctx.currentTime + 0.05;
+      this.radioBarIdx = 0;
+    }
+    return this.station;
   }
 
   /** Per-frame loop levels; cheap param nudges only. */
@@ -134,6 +166,131 @@ export class AudioEngine {
     this.sirenGain?.gain.setTargetAtTime(s.sirenNear ? 0.12 : 0, t, 0.15);
     this.rainGain?.gain.setTargetAtTime(s.rainIntensity * 0.16, t, 0.4);
     if (s.thunder) this.thunder();
+
+    // Radio: audible only in a vehicle; bars scheduled half a second ahead.
+    const onAir = this.station > 0 && s.driving;
+    this.radioGain?.gain.setTargetAtTime(onAir ? 0.13 : 0, t, 0.12);
+    if (onAir && this.radioGain) {
+      if (this.radioBarEnd < t) this.radioBarEnd = t + 0.05;
+      while (this.radioBarEnd < t + 0.6) {
+        this.radioBarEnd += this.scheduleBar(this.station, this.radioBarEnd, this.radioBarIdx++);
+      }
+    }
+  }
+
+  /** Synthesize one bar of the station at barStart; returns bar length s. */
+  private scheduleBar(station: number, barStart: number, barIdx: number): number {
+    const ctx = this.ctx;
+    const out = this.radioGain;
+    if (!ctx || !out) return 2;
+    if (station === 1) {
+      // Nightdrive FM — 100bpm synthwave: pad chord, offbeat bass, hats.
+      const bar = (60 / 100) * 4;
+      const root = NIGHTDRIVE_ROOTS[barIdx % 4];
+      for (const mul of [1, 1.5, 2.02]) {
+        const o = ctx.createOscillator();
+        o.type = "sawtooth";
+        o.frequency.value = root * mul;
+        const f = ctx.createBiquadFilter();
+        f.type = "lowpass";
+        f.frequency.setValueAtTime(420, barStart);
+        f.frequency.linearRampToValueAtTime(900, barStart + bar / 2);
+        f.frequency.linearRampToValueAtTime(420, barStart + bar);
+        const g = ctx.createGain();
+        g.gain.setValueAtTime(0.06, barStart);
+        g.gain.setValueAtTime(0.06, barStart + bar - 0.05);
+        g.gain.linearRampToValueAtTime(0.0001, barStart + bar);
+        o.connect(f); f.connect(g); g.connect(out);
+        o.start(barStart); o.stop(barStart + bar + 0.02);
+      }
+      for (let n = 0; n < 8; n++) {
+        const tN = barStart + (n * bar) / 8;
+        const b = ctx.createOscillator();
+        b.type = "sine";
+        b.frequency.value = root * (n % 2 === 0 ? 0.5 : 1);
+        const g = ctx.createGain();
+        g.gain.setValueAtTime(n % 2 ? 0.1 : 0.16, tN);
+        g.gain.exponentialRampToValueAtTime(0.001, tN + bar / 9);
+        b.connect(g); g.connect(out);
+        b.start(tN); b.stop(tN + bar / 8);
+        if (this.noiseBuf && n % 2 === 1) {
+          const h = ctx.createBufferSource();
+          h.buffer = this.noiseBuf;
+          const hf = ctx.createBiquadFilter();
+          hf.type = "highpass";
+          hf.frequency.value = 6000;
+          const hg = ctx.createGain();
+          hg.gain.setValueAtTime(0.05, tN);
+          hg.gain.exponentialRampToValueAtTime(0.001, tN + 0.05);
+          h.connect(hf); hf.connect(hg); hg.connect(out);
+          h.start(tN, Math.random()); h.stop(tN + 0.06);
+        }
+      }
+      return bar;
+    }
+    if (station === 2) {
+      // Bedrock Beats — 84bpm lo-fi: kick 1 & 3.5, snare 2/4, dusty stab.
+      const bar = (60 / 84) * 4;
+      const beat = bar / 4;
+      for (const at of [0, 2.5 * beat]) {
+        const k = ctx.createOscillator();
+        k.type = "sine";
+        k.frequency.setValueAtTime(120, barStart + at);
+        k.frequency.exponentialRampToValueAtTime(40, barStart + at + 0.12);
+        const g = ctx.createGain();
+        g.gain.setValueAtTime(0.3, barStart + at);
+        g.gain.exponentialRampToValueAtTime(0.001, barStart + at + 0.18);
+        k.connect(g); g.connect(out);
+        k.start(barStart + at); k.stop(barStart + at + 0.2);
+      }
+      if (this.noiseBuf) {
+        for (const at of [beat, 3 * beat]) {
+          const sN = ctx.createBufferSource();
+          sN.buffer = this.noiseBuf;
+          const f = ctx.createBiquadFilter();
+          f.type = "bandpass";
+          f.frequency.value = 1800;
+          const g = ctx.createGain();
+          g.gain.setValueAtTime(0.16, barStart + at);
+          g.gain.exponentialRampToValueAtTime(0.001, barStart + at + 0.16);
+          sN.connect(f); f.connect(g); g.connect(out);
+          sN.start(barStart + at, Math.random()); sN.stop(barStart + at + 0.18);
+        }
+      }
+      const stabRoot = NIGHTDRIVE_ROOTS[(barIdx + 2) % 4] * 2;
+      for (const mul of LOFI_CHORD) {
+        const o = ctx.createOscillator();
+        o.type = "triangle";
+        o.frequency.value = stabRoot * mul;
+        const g = ctx.createGain();
+        g.gain.setValueAtTime(0.045, barStart);
+        g.gain.exponentialRampToValueAtTime(0.001, barStart + beat * 1.6);
+        o.connect(g); g.connect(out);
+        o.start(barStart); o.stop(barStart + beat * 1.7);
+      }
+      return bar;
+    }
+    // Static AM — talk radio: syllabic bandpassed noise with pauses.
+    const seg = 1.6;
+    if (this.noiseBuf) {
+      let tN = barStart + 0.1;
+      while (tN < barStart + seg - 0.15) {
+        const dur = 0.05 + Math.random() * 0.16;
+        const sN = ctx.createBufferSource();
+        sN.buffer = this.noiseBuf;
+        const f = ctx.createBiquadFilter();
+        f.type = "bandpass";
+        f.frequency.value = 400 + Math.random() * 1800;
+        f.Q.value = 4;
+        const g = ctx.createGain();
+        g.gain.setValueAtTime(0.14, tN);
+        g.gain.exponentialRampToValueAtTime(0.001, tN + dur);
+        sN.connect(f); f.connect(g); g.connect(out);
+        sN.start(tN, Math.random()); sN.stop(tN + dur + 0.02);
+        tN += dur + (Math.random() < 0.25 ? 0.3 : 0.04);
+      }
+    }
+    return seg;
   }
 
   /** Route one frame's drained sim events into one-shot voices. */
