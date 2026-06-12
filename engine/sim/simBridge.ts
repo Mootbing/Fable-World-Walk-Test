@@ -339,6 +339,18 @@ export class SimBridge {
     return this.sim.spawn_boat(x, z);
   }
 
+  bridgeEdgeCount(): number {
+    return this.sim.bridge_edge_count();
+  }
+
+  bridgeProbe(): number[] {
+    return Array.from(this.sim.bridge_probe() as Float64Array);
+  }
+
+  deckProbe(x: number, z: number): number[] {
+    return Array.from(this.sim.deck_probe(x, z) as Float64Array);
+  }
+
   policeHeliActive(): boolean {
     return this.sim.police_heli_active();
   }

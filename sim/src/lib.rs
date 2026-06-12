@@ -453,6 +453,36 @@ impl Sim {
         self.spawn_vehicle(x, z, 0.0, vehicle::KIND_BOAT)
     }
 
+    pub fn bridge_edge_count(&self) -> u32 {
+        self.roads.edges.iter().flatten().filter(|e| e.bridge).count() as u32
+    }
+
+    /// Midpoint [x, z] of the nearest deck-computable bridge edge.
+    pub fn bridge_probe(&self) -> Vec<f64> {
+        let mut best: Option<(f64, f64, f64)> = None;
+        for e in self.roads.edges.iter().flatten() {
+            if !e.bridge || e.points.len() < 2 {
+                continue;
+            }
+            let (sx, sz) = e.points[0];
+            let (tx, tz) = e.points[e.points.len() - 1];
+            if self.heights.sample(sx, sz).is_none() || self.heights.sample(tx, tz).is_none() {
+                continue;
+            }
+            let (mx, mz, _, _) = roads::sample_polyline(&e.points, e.len * 0.5);
+            let d2 = (mx - self.player.x).powi(2) + (mz - self.player.z).powi(2);
+            if best.is_none_or(|(_, _, b)| d2 < b) {
+                best = Some((mx, mz, d2));
+            }
+        }
+        best.map_or(Vec::new(), |(x, z, _)| vec![x, z])
+    }
+
+    /// [deck] if a bridge deck spans (x,z), else empty.
+    pub fn deck_probe(&self, x: f64, z: f64) -> Vec<f64> {
+        self.roads.deck_at(x, z, &self.heights).map_or(Vec::new(), |d| vec![d])
+    }
+
     pub fn police_heli_active(&self) -> bool {
         self.police_heli.is_some()
     }
@@ -1058,12 +1088,17 @@ impl Sim {
                 handbrake: self.input.is_down(input::BTN_JUMP),
             };
             let wet_grip = self.weather_grip();
+            let deck = {
+                let v = &self.vehicles[i];
+                self.roads.deck_at(v.x, v.z, &self.heights)
+            };
             self.vehicles[i].substep(
                 Some(&drive),
                 &self.heights,
                 &self.collision,
                 &mut self.events,
                 wet_grip,
+                deck,
                 SUBSTEP,
             );
             }
@@ -1079,13 +1114,19 @@ impl Sim {
             self.player.yaw = v.yaw;
         } else {
             let (wx, wz) = (self.player.x, self.player.z);
-            let water = self.water.level_at(self.player.x, self.player.z, &self.heights);
+            let deck = self.roads.deck_at(self.player.x, self.player.z, &self.heights);
+            let water = match self.water.level_at(self.player.x, self.player.z, &self.heights) {
+                // A deck overhead keeps the river crossing dry.
+                Some(lvl) if deck.is_none_or(|d| d < lvl + 0.3) => Some(lvl),
+                _ => None,
+            };
             let impact = self.player.substep(
                 &self.input,
                 &self.heights,
                 &self.collision,
                 &mut self.events,
                 water,
+                deck,
                 SUBSTEP,
             );
             if let Some(impact) = impact {
@@ -1153,6 +1194,7 @@ impl Sim {
                 &self.collision,
                 &mut self.events,
                 wet_grip,
+                None,
                 SUBSTEP,
             );
         }
@@ -2163,6 +2205,83 @@ mod tests {
     }
 
     #[test]
+    fn bridges_hold_their_deck_over_the_valley() {
+        let mut sim = Sim::new(9, 0.0, 0.0);
+        // Radial valley: 6m banks, -4m basin around (0,-50).
+        let mut grid = vec![6.0f32; FIELD_SIZE * FIELD_SIZE];
+        for j in 0..FIELD_SIZE {
+            for i in 0..FIELD_SIZE {
+                let x = -500.0 + (i as f64 / (FIELD_SIZE - 1) as f64) * 1000.0;
+                let z = -500.0 + (j as f64 / (FIELD_SIZE - 1) as f64) * 1000.0;
+                let (dx, dz) = (x - 0.0, z - (-50.0));
+                if (dx * dx + dz * dz).sqrt() < 25.0 {
+                    grid[j * FIELD_SIZE + i] = -4.0;
+                }
+                // Same dip mirrored for the draped road at x = 60.
+                let (dx2, dz2) = (x - 60.0, z - (-50.0));
+                if (dx2 * dx2 + dz2 * dz2).sqrt() < 25.0 {
+                    grid[j * FIELD_SIZE + i] = -4.0;
+                }
+            }
+        }
+        sim.load_heightfield(0, 0, -500.0, -500.0, 1000.0, &grid);
+        // One bridge span over the basin, one plain road through its twin.
+        sim.load_tile_roads(
+            0,
+            0,
+            &[0.0, -10.0, 0.0, -90.0, 60.0, -10.0, 60.0, -90.0],
+            &[0, 2, 4],
+            &[2 | (4 << 8) | (8 << 16), 2 | (8 << 16)], // bridge, plain
+        );
+        sim.set_player_enabled(true);
+
+        // The deck holds bank height mid-span; the plain road dips.
+        let deck = sim.roads.deck_at(0.0, -50.0, &sim.heights);
+        assert!(deck.is_some_and(|d| d > 5.0), "deck mid-span: {deck:?}");
+        assert!(sim.roads.deck_at(60.0, -50.0, &sim.heights).is_none(), "no deck off-bridge");
+        assert!(sim.roads.deck_at(300.0, 300.0, &sim.heights).is_none());
+
+        // Walk the span: the player never drops into the basin.
+        for _ in 0..240 {
+            sim.step(SUBSTEP); // land first
+        }
+        sim.set_player_pos(0.0, -12.0);
+        sim.set_input(input::BTN_SPRINT, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0);
+        let mut min_y = f64::INFINITY;
+        for _ in 0..(25 * 60) {
+            sim.step(SUBSTEP);
+            if sim.player_z() > -88.0 && sim.player_z() < -12.0 {
+                min_y = min_y.min(sim.player_y());
+            }
+            if sim.player_z() <= -88.0 {
+                break;
+            }
+        }
+        assert!(sim.player_z() <= -85.0, "crossed, z={:.1}", sim.player_z());
+        assert!(min_y > 6.5, "stayed on the deck, min eye y={min_y:.1}");
+
+        // Drive the draped twin: it genuinely dips (the contrast case).
+        let car = sim.spawn_vehicle(60.0, -12.0, 0.0, vehicle::KIND_SEDAN);
+        assert!(car > 0);
+        sim.set_player_pos(58.0, -12.0);
+        sim.set_input(input::BTN_ENTER, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+        sim.step(SUBSTEP);
+        assert!(sim.driving());
+        sim.set_input(0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0);
+        let mut dipped = f64::INFINITY;
+        for _ in 0..(12 * 60) {
+            sim.step(SUBSTEP);
+            if sim.player_z() > -75.0 && sim.player_z() < -25.0 {
+                dipped = dipped.min(sim.player_y());
+            }
+            if sim.player_z() <= -80.0 {
+                break;
+            }
+        }
+        assert!(dipped < 2.0, "plain road drapes into the dip, min y={dipped:.1}");
+    }
+
+    #[test]
     fn heli_flies_clears_rooftops_and_lands() {
         let mut sim = Sim::new(5, 0.0, 0.0);
         sim.load_heightfield(0, 0, -500.0, -500.0, 1000.0, &vec![0.0; FIELD_SIZE * FIELD_SIZE]);
@@ -2301,7 +2420,7 @@ mod tests {
             let throttle_brake = vehicle::DriveInput { throttle: -1.0, steer: 0.0, handbrake: false };
             let mut steps = 0;
             while v.v_long > 0.5 && steps < 6000 {
-                v.substep(Some(&throttle_brake), &hg, &cw, &mut ev, grip, SUBSTEP);
+                v.substep(Some(&throttle_brake), &hg, &cw, &mut ev, grip, None, SUBSTEP);
                 steps += 1;
             }
             (v.z.abs().max(v.x.abs()), v.x.hypot(v.z))
@@ -2324,7 +2443,7 @@ mod tests {
             let turn = vehicle::DriveInput { throttle: 0.3, steer: 1.0, handbrake: false };
             let mut max_lat: f64 = 0.0;
             for _ in 0..90 {
-                v.substep(Some(&turn), &hg, &cw, &mut ev, grip, SUBSTEP);
+                v.substep(Some(&turn), &hg, &cw, &mut ev, grip, None, SUBSTEP);
                 max_lat = max_lat.max(v.v_lat.abs());
             }
             max_lat

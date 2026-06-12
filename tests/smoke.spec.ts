@@ -1127,6 +1127,19 @@ test("boots from fixtures, sim ticks, player walks", async ({ page }) => {
     timeout: 5_000,
   });
 
+  // PR37: bridges — real spans carry a deck height instead of draping.
+  const br37 = (await page.evaluate(() => window.__ww!.query("bridge"))) as {
+    edges: number;
+    probe: number[];
+  };
+  expect(br37.edges).toBeGreaterThan(0);
+  expect(br37.probe.length).toBe(2);
+  const deck37 = (await page.evaluate(
+    ([x, z]) => window.__ww!.cmd("deckAt", x, z),
+    br37.probe as [number, number],
+  )) as number[];
+  expect(deck37.length).toBe(1);
+
   // World actually meshed: 9 terrain chunks alone are ~295k triangles, and
   // Times Square building tiles add meshes on top.
   const render = (await page.evaluate(() => window.__ww!.query("render"))) as {

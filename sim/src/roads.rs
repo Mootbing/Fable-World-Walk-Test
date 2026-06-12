@@ -69,6 +69,14 @@ pub struct Edge {
     pub class: u8,
     pub speed: f64,
     pub len: f64,
+    /// Grade-separated span: the deck height interpolates between the
+    /// endpoint grounds instead of draping on the DEM (droopy bridges).
+    pub bridge: bool,
+    /// Centerline bbox (deck queries pre-filter on it).
+    pub min_x: f64,
+    pub max_x: f64,
+    pub min_z: f64,
+    pub max_z: f64,
     /// Centerline from→to, world XZ.
     pub points: Vec<(f64, f64)>,
 }
@@ -82,6 +90,55 @@ pub struct RoadGraph {
 }
 
 impl RoadGraph {
+    /// Deck height if (x,z) rides a bridge span within ~7m of its
+    /// centerline: endpoint grounds lerped along the arc. None when no
+    /// bridge is near or its banks have no decoded heights yet.
+    pub fn deck_at(&self, x: f64, z: f64, heights: &crate::terrain::HeightGrid) -> Option<f64> {
+        const REACH: f64 = 7.0;
+        let mut best: Option<(f64, f64)> = None; // (d2, deck)
+        for e in self.edges.iter().flatten() {
+            if !e.bridge
+                || x < e.min_x - REACH
+                || x > e.max_x + REACH
+                || z < e.min_z - REACH
+                || z > e.max_z + REACH
+            {
+                continue;
+            }
+            let mut d2_best = f64::INFINITY;
+            let mut arc_best = 0.0;
+            let mut arc = 0.0;
+            for w in e.points.windows(2) {
+                let (ax, az) = w[0];
+                let (bx, bz) = w[1];
+                let (ex, ez) = (bx - ax, bz - az);
+                let seg_len = (ex * ex + ez * ez).sqrt().max(1e-9);
+                let t = (((x - ax) * ex + (z - az) * ez) / (seg_len * seg_len)).clamp(0.0, 1.0);
+                let (cx, cz) = (ax + ex * t, az + ez * t);
+                let d2 = (cx - x).powi(2) + (cz - z).powi(2);
+                if d2 < d2_best {
+                    d2_best = d2;
+                    arc_best = arc + seg_len * t;
+                }
+                arc += seg_len;
+            }
+            if d2_best > REACH * REACH {
+                continue;
+            }
+            if best.is_none_or(|(b, _)| d2_best < b) {
+                let (sx, sz) = *e.points.first()?;
+                let (tx, tz) = *e.points.last()?;
+                let (Some(h0), Some(h1)) = (heights.sample(sx, sz), heights.sample(tx, tz))
+                else {
+                    continue;
+                };
+                let t = (arc_best / e.len.max(1e-9)).clamp(0.0, 1.0);
+                best = Some((d2_best, h0 + (h1 - h0) * t));
+            }
+        }
+        best.map(|(_, deck)| deck)
+    }
+
     pub fn new() -> Self {
         RoadGraph {
             node_ids: HashMap::new(),
@@ -153,12 +210,12 @@ impl RoadGraph {
                 }
                 let speed = CLASS_SPEEDS[(attr.class as usize).min(CLASS_SPEEDS.len() - 1)];
                 if attr.oneway >= 0 {
-                    new_edges.push(self.add_edge(a, b, seg.to_vec(), attr.class, speed, len));
+                    new_edges.push(self.add_edge(a, b, seg.to_vec(), attr.class, speed, len, attr.bridge));
                 }
                 if attr.oneway <= 0 {
                     let mut rev = seg.to_vec();
                     rev.reverse();
-                    new_edges.push(self.add_edge(b, a, rev, attr.class, speed, len));
+                    new_edges.push(self.add_edge(b, a, rev, attr.class, speed, len, attr.bridge));
                 }
             }
         }
@@ -303,13 +360,27 @@ impl RoadGraph {
         class: u8,
         speed: f64,
         len: f64,
+        bridge: bool,
     ) -> u32 {
+        let (mut min_x, mut max_x) = (f64::INFINITY, f64::NEG_INFINITY);
+        let (mut min_z, mut max_z) = (f64::INFINITY, f64::NEG_INFINITY);
+        for &(x, z) in &points {
+            min_x = min_x.min(x);
+            max_x = max_x.max(x);
+            min_z = min_z.min(z);
+            max_z = max_z.max(z);
+        }
         let edge = Edge {
             from,
             to,
             class,
             speed,
             len,
+            bridge,
+            min_x,
+            max_x,
+            min_z,
+            max_z,
             points,
         };
         let id = match self.free_edges.pop() {

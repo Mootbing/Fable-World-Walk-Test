@@ -65,6 +65,7 @@ impl Player {
         collision: &CollisionWorld,
         events: &mut Events,
         water: Option<f64>,
+        floor: Option<f64>,
         dt: f64,
     ) -> Option<f64> {
         // Swim when standing water covers the spot and we're down at its
@@ -106,7 +107,7 @@ impl Player {
             self.smooth_ground = Some(lvl - 1.0);
             return None;
         }
-        self.update_vertical(input, events, heights, dt)
+        self.update_vertical(input, events, heights, floor, dt)
     }
 
     fn update_vertical(
@@ -114,9 +115,15 @@ impl Player {
         input: &Input,
         events: &mut Events,
         heights: &HeightGrid,
+        floor: Option<f64>,
         dt: f64,
     ) -> Option<f64> {
-        if let Some(g) = heights.sample(self.x, self.z) {
+        if let Some(mut g) = heights.sample(self.x, self.z) {
+            if let Some(f) = floor {
+                if f > g {
+                    g = f; // bridge deck underfoot beats the DEM below it
+                }
+            }
             self.last_ground = Some(g);
         }
         let Some(last) = self.last_ground else {
@@ -191,7 +198,7 @@ mod tests {
         let cw = CollisionWorld::new();
         let idle = Input::default();
         for _ in 0..120 {
-            p.substep(&idle, hg, &cw, &mut ev, None, DT);
+            p.substep(&idle, hg, &cw, &mut ev, None, None, DT);
         }
         ev.clear();
         (p, ev)
@@ -214,13 +221,13 @@ mod tests {
         let cw = CollisionWorld::new();
         let mut input = Input::default();
         input.buttons = BTN_JUMP;
-        p.substep(&input, &hg, &cw, &mut ev, None, DT); // rising edge -> jump
+        p.substep(&input, &hg, &cw, &mut ev, None, None, DT); // rising edge -> jump
         input.tick(); // latch prev_buttons
 
         let mut apex: f64 = p.y;
         let mut landed_at = 0;
         for i in 0..240 {
-            p.substep(&input, &hg, &cw, &mut ev, None, DT);
+            p.substep(&input, &hg, &cw, &mut ev, None, None, DT);
             apex = apex.max(p.y);
             if p.grounded {
                 landed_at = i;
@@ -258,7 +265,7 @@ mod tests {
         let cw = CollisionWorld::new();
         let idle = Input::default();
         for _ in 0..240 {
-            p.substep(&idle, &hg, &cw, &mut ev, None, DT);
+            p.substep(&idle, &hg, &cw, &mut ev, None, None, DT);
         }
         assert!((p.y - (50.0 + EYE_HEIGHT)).abs() < 0.1);
 
@@ -268,7 +275,7 @@ mod tests {
         input.move_x = 1.0;
         let mut fell = false;
         for _ in 0..2400 {
-            p.substep(&input, &hg, &cw, &mut ev, None, DT);
+            p.substep(&input, &hg, &cw, &mut ev, None, None, DT);
             input.tick();
             if !p.grounded {
                 fell = true;
@@ -305,7 +312,7 @@ mod tests {
         input.buttons = BTN_SPRINT;
         input.move_x = 1.0; // sprint east into the wall
         for _ in 0..600 {
-            p.substep(&input, &hg, &cw, &mut ev, None, DT);
+            p.substep(&input, &hg, &cw, &mut ev, None, None, DT);
             input.tick();
         }
         assert!(p.x <= 5.0 - RADIUS + 0.02, "penetrated to x={}", p.x);

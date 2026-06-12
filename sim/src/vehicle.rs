@@ -141,6 +141,7 @@ impl Vehicle {
         collision: &CollisionWorld,
         events: &mut Events,
         grip_scale: f64,
+        floor: Option<f64>,
         dt: f64,
     ) {
         let s = spec(self.kind);
@@ -243,7 +244,12 @@ impl Vehicle {
         self.wheel_spin += self.v_long * dt / WHEEL_RADIUS;
 
         // --- ground follow + visual slope pitch/roll ---
-        if let Some(g) = heights.sample(self.x, self.z) {
+        // A bridge deck under the wheels overrides lower DEM samples.
+        let lift = |h: f64| match floor {
+            Some(f) if f > h => f,
+            _ => h,
+        };
+        if let Some(g) = heights.sample(self.x, self.z).map(lift) {
             let smooth = match self.smooth_ground {
                 Some(s) => s + (g - s) * (dt * 8.0).min(1.0),
                 None => g,
@@ -253,10 +259,10 @@ impl Vehicle {
 
             let hl = s.half_length;
             let hw = s.half_width;
-            let ahead = heights.sample(self.x + fx * hl, self.z + fz * hl);
-            let behind = heights.sample(self.x - fx * hl, self.z - fz * hl);
-            let right_h = heights.sample(self.x + rx * hw, self.z + rz * hw);
-            let left_h = heights.sample(self.x - rx * hw, self.z - rz * hw);
+            let ahead = heights.sample(self.x + fx * hl, self.z + fz * hl).map(lift);
+            let behind = heights.sample(self.x - fx * hl, self.z - fz * hl).map(lift);
+            let right_h = heights.sample(self.x + rx * hw, self.z + rz * hw).map(lift);
+            let left_h = heights.sample(self.x - rx * hw, self.z - rz * hw).map(lift);
             let target_pitch = match (ahead, behind) {
                 (Some(a), Some(b)) => ((a - b) / (2.0 * hl)).atan(),
                 _ => 0.0,
@@ -299,7 +305,7 @@ mod bike_tests {
             let mut v = Vehicle::new(1, kind, 0, 0.0, 0.0, 0.0);
             v.v_long = 20.0;
             for _ in 0..90 {
-                v.substep(Some(&input), &hg, &cw, ev, 1.0, DT);
+                v.substep(Some(&input), &hg, &cw, ev, 1.0, None, DT);
             }
             v.roll
         };
@@ -328,7 +334,7 @@ mod tests {
         let mut ev = Events::new();
         let steps = (seconds / DT) as usize;
         for _ in 0..steps {
-            v.substep(Some(&input), hg, cw, &mut ev, 1.0, DT);
+            v.substep(Some(&input), hg, cw, &mut ev, 1.0, None, DT);
         }
     }
 
@@ -433,7 +439,7 @@ mod tests {
         let input = DriveInput { throttle: 1.0, steer: 0.0, handbrake: false };
         let mut crashed = false;
         for _ in 0..600 {
-            v.substep(Some(&input), &hg, &cw, &mut ev, 1.0, DT);
+            v.substep(Some(&input), &hg, &cw, &mut ev, 1.0, None, DT);
             for e in 0..ev.count() as usize {
                 if unsafe { *ev.as_ptr().add(e * 4) } == EV_CRASH {
                     crashed = true;
