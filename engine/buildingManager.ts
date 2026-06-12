@@ -24,6 +24,7 @@ interface BuildingTile {
   geometries: THREE.BufferGeometry[];
   buildings: BuildingFeature[];
   mesh: THREE.Mesh | null;
+  windows: THREE.Points | null;
 }
 
 /**
@@ -51,6 +52,15 @@ export class BuildingManager {
   private resolving: Promise<void> | null = null;
   private lastTemplateAttempt = 0;
   private material = new THREE.MeshLambertMaterial({ color: 0xd6d3cb });
+  /** Shared by every tile's window points; engine drives opacity at night. */
+  readonly windowMaterial = new THREE.PointsMaterial({
+    color: 0xffcf7e,
+    size: 1.6,
+    sizeAttenuation: true,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+  });
 
   constructor(
     private anchor: WorldAnchor,
@@ -139,6 +149,7 @@ export class BuildingManager {
       cursor: 0,
       geometries: [],
       buildings: [],
+      windows: null,
       mesh: null,
     };
     this.tiles.set(key, tile);
@@ -209,6 +220,50 @@ export class BuildingManager {
     }
   }
 
+  /**
+   * Sparse warm dots along facade edges at floor heights — at night they
+   * read as lit windows. One Points object per tile, world-anchored at
+   * the tile NW like the merged mesh.
+   */
+  private buildWindowPoints(tile: BuildingTile): THREE.Points | null {
+    const nw = this.anchor.tileNWWorld(tile.tx, tile.ty, CONFIG.buildingZoom);
+    const verts: number[] = [];
+    let lcg = ((tile.tx * 73856093) ^ (tile.ty * 19349663)) >>> 0 || 1;
+    const rand = () => ((lcg = (lcg * 1664525 + 1013904223) >>> 0) / 0xffffffff);
+    outer: for (const b of tile.buildings) {
+      const ring = b.rings[0];
+      if (!ring || b.height < 5) continue;
+      const baseY = this.heights.sample(ring[0][0], ring[0][1]) ?? 0;
+      let placed = 0;
+      for (let i = 0; i < ring.length - 1 && placed < 24; i++) {
+        const [ax, az] = ring[i];
+        const [bx, bz] = ring[i + 1];
+        const len = Math.hypot(bx - ax, bz - az);
+        if (len < 5) continue;
+        const steps = Math.min(6, Math.floor(len / 3.2));
+        for (let s = 1; s <= steps; s++) {
+          const t = s / (steps + 1);
+          for (let y = baseY + 4; y < baseY + b.height - 1; y += 3.4) {
+            if (rand() > 0.3) continue;
+            verts.push(
+              ax + (bx - ax) * t - nw.x,
+              y,
+              az + (bz - az) * t - nw.z,
+            );
+            placed++;
+            if (verts.length >= 9000) break outer;
+          }
+        }
+      }
+    }
+    if (verts.length === 0) return null;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(verts, 3));
+    const points = new THREE.Points(geo, this.windowMaterial);
+    points.frustumCulled = false;
+    return points;
+  }
+
   private finalize(key: string, tile: BuildingTile): void {
     if (tile.geometries.length > 0) {
       const merged = mergeGeometries(tile.geometries, false);
@@ -222,6 +277,14 @@ export class BuildingManager {
         mesh.updateMatrix();
         this.group.add(mesh);
         tile.mesh = mesh;
+        const windows = this.buildWindowPoints(tile);
+        if (windows) {
+          windows.position.copy(mesh.position);
+          windows.matrixAutoUpdate = false;
+          windows.updateMatrix();
+          this.group.add(windows);
+          tile.windows = windows;
+        }
       }
     }
     this.collision.addTile(key, tile.buildings);
@@ -242,6 +305,11 @@ export class BuildingManager {
       this.group.remove(tile.mesh);
       tile.mesh.geometry.dispose();
       tile.mesh = null;
+    }
+    if (tile.windows) {
+      this.group.remove(tile.windows);
+      tile.windows.geometry.dispose();
+      tile.windows = null;
     }
     tile.state = "disposed";
   }
