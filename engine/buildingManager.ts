@@ -51,7 +51,7 @@ export class BuildingManager {
   private templateFailed = false;
   private resolving: Promise<void> | null = null;
   private lastTemplateAttempt = 0;
-  private material = new THREE.MeshLambertMaterial({ color: 0xd6d3cb });
+  private material = new THREE.MeshLambertMaterial({ color: 0xd6d3cb, vertexColors: true });
   /** Shared by every tile's window points; engine drives opacity at night. */
   readonly windowMaterial = new THREE.PointsMaterial({
     color: 0xffcf7e,

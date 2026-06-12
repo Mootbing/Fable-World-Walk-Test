@@ -935,6 +935,24 @@ test("boots from fixtures, sim ticks, player walks", async ({ page }) => {
     timeout: 5_000,
   });
 
+  // PR33: character pass — dressed peds render through all six pools.
+  const p33 = (await page.evaluate(() => window.__ww!.query("player"))) as {
+    x: number;
+    z: number;
+  };
+  for (const off of [3, 4.5, 6]) {
+    await page.evaluate(
+      ([x, z]) => window.__ww!.cmd("spawnPed", x, z),
+      [p33.x + off, p33.z - 4] as [number, number],
+    );
+  }
+  await page.waitForFunction(
+    () => (window.__ww!.query("pedRender") as number) >= 3,
+    undefined,
+    { timeout: 5_000 },
+  );
+  await page.screenshot({ path: "test-results/characters.png" });
+
   // World actually meshed: 9 terrain chunks alone are ~295k triangles, and
   // Times Square building tiles add meshes on top.
   const render = (await page.evaluate(() => window.__ww!.query("render"))) as {

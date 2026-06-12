@@ -11,6 +11,8 @@ import { LANE, STATE_FLAG } from "../sim/entityLayout";
  */
 export class PlayerAvatar {
   readonly group = new THREE.Group();
+  /** Two-hand raise while the aim cam is up (set from the rig). */
+  aiming = false;
 
   private torso: THREE.Group;
   private leftArm: THREE.Group;
@@ -41,11 +43,21 @@ export class PlayerAvatar {
     const shoulder = hip + PlayerAvatar.TORSO - 0.04;
 
     this.torso = new THREE.Group();
-    const chest = new THREE.Mesh(new THREE.BoxGeometry(0.42, PlayerAvatar.TORSO, 0.24), shirt);
-    chest.position.y = hip + PlayerAvatar.TORSO / 2;
+    const chest = new THREE.Mesh(
+      new THREE.BoxGeometry(0.42, PlayerAvatar.TORSO - 0.16, 0.24),
+      shirt,
+    );
+    chest.position.y = hip + 0.16 + (PlayerAvatar.TORSO - 0.16) / 2;
+    const pelvis = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.18, 0.23), pants);
+    pelvis.position.y = hip + 0.08;
     const head = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.26, 0.26), skin);
     head.position.y = shoulder + 0.2;
-    this.torso.add(chest, head);
+    const hair = new THREE.Mesh(
+      new THREE.BoxGeometry(0.26, 0.09, 0.28),
+      new THREE.MeshLambertMaterial({ color: 0x23180f }),
+    );
+    hair.position.set(0, shoulder + 0.36, 0.01);
+    this.torso.add(chest, pelvis, head, hair);
 
     this.leftArm = limb(0.12, PlayerAvatar.ARM, shirt);
     this.leftArm.position.set(0.28, shoulder, 0);
@@ -91,6 +103,19 @@ export class PlayerAvatar {
     );
     this.group.quaternion.copy(this.quat);
 
+    if (this.aiming) {
+      // Two-handed stance toward the camera yaw.
+      this.leftArm.rotation.x = -1.45;
+      this.rightArm.rotation.x = -1.5;
+      this.leftArm.rotation.z = -0.25;
+      this.rightArm.rotation.z = 0.12;
+      this.leftLeg.rotation.x = 0.08;
+      this.rightLeg.rotation.x = -0.08;
+      this.torso.position.y = 0;
+      return;
+    }
+    this.leftArm.rotation.z = 0;
+    this.rightArm.rotation.z = 0;
     if (punch > 0) {
       // Jab: right arm drives forward, slight torso twist.
       const t = Math.sin(punch * Math.PI);

@@ -62,6 +62,7 @@ function Scene({
     rig.driving = engine.driveState;
     rig.aiming = frame.aim && !engine.driveState;
     engine.avatar.visible = rig.mode === "tp" && !engine.driveState;
+    engine.avatar.aiming = rig.aiming;
     rig.apply(camera, engine.playerX, engine.playerY, engine.playerZ, engine.cameraClamp, dt);
     engine.camMode = rig.mode;
     engine.camPos = { x: camera.position.x, y: camera.position.y, z: camera.position.z };

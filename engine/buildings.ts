@@ -136,5 +136,23 @@ export function extrudeBuilding(
   geometry.translate(0, ground - 1.5 + building.minHeight, 0);
   // Drop the extrude UVs so tiles can merge with positions+normals only.
   geometry.deleteAttribute("uv");
+
+  // Subtle per-building tint (hash of the footprint anchor) so blocks
+  // read as separate structures instead of one gray mass.
+  let h = (Math.round(exterior[0][0] * 7) ^ (Math.round(exterior[0][1] * 13) << 11)) >>> 0;
+  h = ((h * 2654435761) ^ (h >>> 15)) >>> 0;
+  const warm = 0.9 + ((h & 0xff) / 255) * 0.1; // 0.90..1.00
+  const cool = 0.9 + (((h >>> 8) & 0xff) / 255) * 0.1;
+  const r = warm;
+  const g = (warm + cool) / 2;
+  const b = cool;
+  const n = geometry.getAttribute("position").count;
+  const colors = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    colors[i * 3] = r;
+    colors[i * 3 + 1] = g;
+    colors[i * 3 + 2] = b;
+  }
+  geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
   return geometry;
 }
